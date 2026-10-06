@@ -1,30 +1,70 @@
 {
-  "version": "0.1.0",
-  "checkedAt": "2026-10-06T08:46:21.357Z",
+  "version": "0.2.0",
+  "checkedAt": "2026-10-06T09:45:53.539Z",
   "unitTests": {
-    "pass": 20,
+    "pass": 60,
     "fail": 0,
-    "renderer": "stub only in unit tests"
+    "renderer": "stub for storage/backend; real media in native acceptance"
   },
   "nativeChecks": [
     {
-      "name": "native independent window",
+      "name": "first launch enters project library without demo project",
       "status": "PASS"
     },
     {
-      "name": "editor sandbox and narrow preload",
+      "name": "editor sandbox and narrow native bridge",
       "status": "PASS"
     },
     {
-      "name": "UI conversation creates three actual scenes",
+      "name": "manual creation and property autosave need no model key",
       "status": "PASS"
     },
     {
-      "name": "manual node property autosave",
+      "name": "native provider form and OS-encrypted synthetic key",
       "status": "PASS"
     },
     {
-      "name": "conversation preserves manual title and stable shot ID",
+      "name": "custom HTTP director builds full project atomically",
+      "status": "PASS"
+    },
+    {
+      "name": "discussion persists without changing or previewing project",
+      "status": "PASS"
+    },
+    {
+      "name": "conversation preserves manually edited title and stable IDs",
+      "status": "PASS"
+    },
+    {
+      "name": "provider failure persists and retry creates one new committed turn",
+      "status": "PASS"
+    },
+    {
+      "name": "actual frame capture",
+      "status": "PASS"
+    },
+    {
+      "name": "scene runs in separate OS renderer process without desktop bridge",
+      "status": "PASS"
+    },
+    {
+      "name": "scene private files and tokenless editor HTTP are denied",
+      "status": "PASS"
+    },
+    {
+      "name": "144 real frames encode with audio, ffprobe and full decode",
+      "status": "PASS"
+    },
+    {
+      "name": "export list reopens historical revision and native MP4 playback advances",
+      "status": "PASS"
+    },
+    {
+      "name": "real project backup and isolated restore preserve editable content",
+      "status": "PASS"
+    },
+    {
+      "name": "duplicate, archive and restore retain source project",
       "status": "PASS"
     },
     {
@@ -32,39 +72,23 @@
       "status": "PASS"
     },
     {
-      "name": "actual deterministic frame capture",
+      "name": "native restart preserves conversations, encrypted key, full undo and redo",
       "status": "PASS"
     },
     {
-      "name": "scene server blocks project state",
+      "name": "compact desktop does not overflow page",
       "status": "PASS"
     },
     {
-      "name": "editor HTTP requires CSRF token",
+      "name": "infinite-loop scene times out while editor and native API remain responsive",
       "status": "PASS"
     },
     {
-      "name": "scene iframe has no desktop bridge or external fetch",
+      "name": "owned scene renderer reset and good-source preview recovery",
       "status": "PASS"
     },
     {
-      "name": "real MP4 encode probe and full decode",
-      "status": "PASS"
-    },
-    {
-      "name": "native exported video playback advances",
-      "status": "PASS"
-    },
-    {
-      "name": "OS encrypted credential persistence",
-      "status": "PASS"
-    },
-    {
-      "name": "native restart restores project conversation and settings",
-      "status": "PASS"
-    },
-    {
-      "name": "compact desktop has no page overflow",
+      "name": "synthetic key removed after acceptance",
       "status": "PASS"
     }
   ],
@@ -75,6 +99,14 @@
     },
     {
       "name": "blank storyboard graph",
+      "status": "PASS"
+    },
+    {
+      "name": "invalid executable reports actual readiness failure",
+      "status": "PASS"
+    },
+    {
+      "name": "environment form executes and validates real tool versions",
       "status": "PASS"
     },
     {
@@ -98,7 +130,23 @@
       "status": "PASS"
     },
     {
+      "name": "unsaved source blocks project navigation and remains visible",
+      "status": "PASS"
+    },
+    {
       "name": "wide desktop graph is bounded and visible",
+      "status": "PASS"
+    },
+    {
+      "name": "visible midframe preview and thumbnail composition",
+      "status": "PASS"
+    },
+    {
+      "name": "bundled ZIP codec backs up and restores outside source workspace",
+      "status": "PASS"
+    },
+    {
+      "name": "closing drains immediate manual edits and restart preserves them",
       "status": "PASS"
     }
   ],
@@ -110,16 +158,18 @@
     "frames": 144,
     "videoCodec": "h264",
     "audioCodec": "aac",
-    "audio": "synthetic fixture tone",
+    "audio": "synthetic test tone",
     "fullDecode": "PASS",
     "nativePlayback": "PASS",
-    "sha256": "090660aba36cf5c93429189190cf38d84c59d3906d9f13c81723226494b27e22"
+    "sha256": "5082374fe7f3e0fb494516dd2ab72eb230577cc34c66fe1c3b20b6b62b564ab5"
   },
   "scope": {
+    "customHTTPProtocol": "PASS via local deterministic HTTP gateway",
     "realProvider": "NOT_CHECKED",
-    "modelImagePixels": "NOT_IMPLEMENTED",
+    "explicitImageAuthorization": "PASS in transport/conversation tests",
     "humanFullViewing": "NOT_CHECKED",
     "crossMachine": "NOT_CHECKED",
-    "publicDistribution": "NOT_CHECKED"
+    "publicDistribution": "NOT_CHECKED",
+    "adHocCodeSign": "PASS"
   }
 }

@@ -14,3 +14,7 @@ void controller.load();
 const flush=()=>{void controller.flush();};
 window.addEventListener('pagehide',flush);
 window.addEventListener('blur',flush);
+window.yingliu?.onBeforeClose?.(async()=>{
+  await controller.flush();
+  return controller.hasUnsavedChanges?{ok:false,message:controller.hasSourceDraft?'前端源码尚未保存，请在源码面板点击「保存源码」后再关闭。':controller.getSnapshot().error||'影片修改尚未保存。请处理保存错误后再关闭。'}:{ok:true};
+});

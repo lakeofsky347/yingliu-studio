@@ -58,7 +58,7 @@ async function projectServer(root:string):Promise<ProjectServer> {
       if(!['GET','HEAD'].includes(req.method??'')){res.writeHead(405);res.end();return;}
       // A loopback listener is insufficient if a foreign website can send a forged Host header.
       const host=req.headers.host??'';
-      if(!/^127\.0\.0\.1:\d+$/.test(host)){res.writeHead(403);res.end();return;}
+      if(!/^(?:127\.0\.0\.1|localhost):\d+$/.test(host)){res.writeHead(403);res.end();return;}
       const pathname=decodeURIComponent(new URL(req.url??'/','http://'+host).pathname);
       const relative=pathname.replace(/^\//,'')||'index.html';
       // Scene code may read render resources, never editor state, journals or source history.
@@ -88,7 +88,8 @@ async function projectServer(root:string):Promise<ProjectServer> {
   });
   await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',()=>{server.off('error',reject);resolve();});});
   const address=server.address();if(!address||typeof address==='string')throw new Error('Unable to bind preview server');
-  return {root:absoluteRoot,server,origin:'http://127.0.0.1:'+address.port};
+  // A distinct site lets Chromium isolate generated JS from the editor renderer.
+  return {root:absoluteRoot,server,origin:'http://localhost:'+address.port};
 }
 async function closeServer(server:Server):Promise<void> {
   server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));
@@ -128,7 +129,7 @@ export class VideoRenderer {
     await fs.mkdir(await projectPath(root,'runtime/scenes'),{recursive:true});
     for(const shot of spec.shots){
       try{
-        const source=await this.store.readSource(root,shot);safeId(shot.id);
+        const source=await this.store.readSource(root,shot,project.revision);safeId(shot.id);
         // ESM modules are files served under a restrictive self-only CSP; no privileged APIs are exposed.
         await fs.writeFile(await projectPath(root,'runtime/scenes/'+shot.id+'.mjs'),source.js);
         sources.push({id:shot.id,html:source.html,css:source.css,moduleUrl:'./scenes/'+shot.id+'.mjs'});
@@ -236,7 +237,7 @@ export class VideoRenderer {
       const bytes=await fs.readFile(source);await fs.writeFile(destination,bytes);inputHashes.push({path:asset.path,sha256:hash(bytes)});
     }
     for(const shot of snapshot.shots){
-      const source=await this.store.readSource(root,shot);await this.store.writeSource(snapshotRoot,shot,source);
+      const source=await this.store.readSource(root,shot,project.revision);await this.store.writeSource(snapshotRoot,shot,source);
       inputHashes.push({path:shot.sourcePath+'/source.json',sha256:hash(json(source))});
     }
     const spec=await this.prepare(snapshotRoot,snapshot),errors:RenderIssue[]=[],frames:FrameCapture[]=[];

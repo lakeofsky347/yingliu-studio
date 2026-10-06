@@ -1,24 +1,28 @@
 {
   "name": "yingliu-studio",
   "productName": "映流 Studio",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "main": "dist/desktop/main.cjs",
-  "description": "独立桌面视频制作 demo：模型对话、分镜节点图、实际帧预览与本地 MP4",
+  "description": "本地视频创作应用：模型对话、分镜节点图、可编辑画面、工程历史与 MP4 导出",
   "license": "MIT",
-  "engines": { "node": ">=22.18" },
+  "engines": {
+    "node": ">=22.18"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "node scripts/build.mjs",
     "test": "node --import tsx --test tests/*.test.ts",
     "dev": "npm run build && node dist/web-server.mjs",
     "start": "npm run build && node scripts/start.mjs",
-    "package:demo": "npm run build && node scripts/package-demo.mjs",
-    "verify": "node scripts/verify-demo.mjs"
+    "package:app": "npm run build && node scripts/package-app.mjs",
+    "package:demo": "npm run package:app",
+    "verify": "node --import tsx scripts/verify-app.ts"
   },
   "dependencies": {
     "@comfyorg/litegraph": "0.17.2",
+    "fflate": "0.8.3",
     "playwright-core": "1.63.0",
     "react": "18.3.1",
     "react-dom": "18.3.1"

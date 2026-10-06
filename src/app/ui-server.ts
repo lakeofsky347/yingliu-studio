@@ -12,11 +12,11 @@ export async function startUiServer(application:Application,uiDirectory:string,p
       if(req.headers.host!==new URL(origin).host){res.writeHead(403);res.end();return;}
       const url=new URL(req.url??'/',origin);
       res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
-      res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: http://127.0.0.1:*; media-src 'self' http://127.0.0.1:*; frame-src http://127.0.0.1:*; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'");
+      res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: http://localhost:*; media-src 'self' http://localhost:*; frame-src http://localhost:*; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'");
       if(url.pathname.startsWith('/api/')){
         if(req.method!=='POST'||req.headers['x-yingliu-token']!==token||req.headers.origin&&req.headers.origin!==origin){res.writeHead(403);res.end();return;}
         const parts:Buffer[]=[];let size=0;
-        for await(const part of req){size+=part.length;if(size>24*1024*1024){res.writeHead(413);res.end();return;}parts.push(part);}
+        for await(const part of req){size+=part.length;if(size>96*1024*1024){res.writeHead(413,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:false,error:{code:'IMPORT_TOO_LARGE',message:'单次传输超过 96 MiB，请分批导入素材或使用桌面工程文件导入。'}}));return;}parts.push(part);}
         const payload=JSON.parse(Buffer.concat(parts).toString('utf8')||'{}');
         const value=await application.route(url.pathname.slice(5),payload);
         res.writeHead(200,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(value));return;

@@ -5,8 +5,10 @@ import { ConversationService } from './conversation.ts';
 import type { RpcResult } from '../shared/types.ts';
 import type { ChatInput, SecretStore } from './contracts.ts';
 import { foundationPacks } from './packs.ts';
+import { applicationHealth } from './health.ts';
+import { exportProjectArchive, importProjectArchive } from './archive.ts';
 
-export const ENDPOINTS=new Set(['catalog','current','create','open','save','import','source','saveSource','restoreSource','preview','generate','export','cancel','environment','reveal','apply','inspect','list','focus','audio','tts','packs.list','providers.get','providers.save','providers.check','chat.history','chat.send','chat.cancel']);
+export const ENDPOINTS=new Set(['catalog','current','create','open','save','import','source','saveSource','restoreSource','preview','generate','export','cancel','environment','reveal','apply','inspect','list','focus','audio','tts','history','undo','redo','rename','duplicate','archive','tasks','retry','packs.list','app.health','app.exportProject','app.importProject','providers.get','providers.save','providers.check','chat.history','chat.send','chat.cancel']);
 export class MemorySecrets implements SecretStore {
   private values=new Map<string,string>();
   async get(ref:string){return this.values.get(ref);}
@@ -19,12 +21,16 @@ export async function createApplication(options:{dataDirectory:string;credential
   const backend=new AppBackend({...options,dataDirectory,providers:providers.host()});
   const conversation=new ConversationService(backend,providers,dataDirectory);
   await backend.call('catalog');
-  async function route(endpoint:string,payload:unknown={}):Promise<RpcResult>{
+  const requests=new Set<Promise<RpcResult>>();let stopping=false,disposal:Promise<void>|undefined;
+  async function dispatch(endpoint:string,payload:unknown={}):Promise<RpcResult>{
     try{
       if(!ENDPOINTS.has(endpoint))throw new Error('不支持此应用操作');
       const data=payload&&typeof payload==='object'&&!Array.isArray(payload)?payload as Record<string,unknown>:{};
       let value:unknown;
       switch(endpoint){
+        case 'app.health':{const snapshot=await backend.call('current');value=await applicationHealth(snapshot.environment,await providers.settings(),dataDirectory);break;}
+        case 'app.exportProject':value=await exportProjectArchive(backend,data);break;
+        case 'app.importProject':value=await importProjectArchive(backend,data);break;
         case 'packs.list':value=foundationPacks;break;
         case 'providers.get':value=await providers.settings();break;
         case 'providers.save':value=await providers.save(data);await backend.call('catalog');break;
@@ -35,8 +41,12 @@ export async function createApplication(options:{dataDirectory:string;credential
         default:return backend.route(endpoint,payload);
       }
       return {ok:true,value};
-    }catch(error){return {ok:false,error:{code:'APP_ERROR',message:error instanceof Error?error.message:'操作失败'}};}
+    }catch(error){return {ok:false,error:{code:typeof (error as {code?:unknown})?.code==='string'?(error as {code:string}).code:'APP_ERROR',message:error instanceof Error?error.message:'操作失败'}};}
   }
-  return {backend,providers,conversation,route,async dispose(){await conversation.cancel();await backend.dispose();}};
+  function route(endpoint:string,payload:unknown={}):Promise<RpcResult>{
+    if(stopping)return Promise.resolve({ok:false,error:{code:'APP_SHUTTING_DOWN',message:'应用正在关闭，请重新打开后继续'}});
+    const request=dispatch(endpoint,payload);requests.add(request);void request.finally(()=>requests.delete(request));return request;
+  }
+  return {backend,providers,conversation,route,dispose(){return disposal??=(async()=>{stopping=true;await conversation.shutdown();await Promise.allSettled([...requests]);await backend.dispose();})();}};
 }
 export type Application=Awaited<ReturnType<typeof createApplication>>;
