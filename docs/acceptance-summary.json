@@ -1,0 +1,121 @@
+{
+  "version": "0.1.0",
+  "checkedAt": "2026-10-06T08:46:21.357Z",
+  "unitTests": {
+    "pass": 20,
+    "fail": 0,
+    "renderer": "stub only in unit tests"
+  },
+  "nativeChecks": [
+    {
+      "name": "native independent window",
+      "status": "PASS"
+    },
+    {
+      "name": "editor sandbox and narrow preload",
+      "status": "PASS"
+    },
+    {
+      "name": "UI conversation creates three actual scenes",
+      "status": "PASS"
+    },
+    {
+      "name": "manual node property autosave",
+      "status": "PASS"
+    },
+    {
+      "name": "conversation preserves manual title and stable shot ID",
+      "status": "PASS"
+    },
+    {
+      "name": "stale revision rejected",
+      "status": "PASS"
+    },
+    {
+      "name": "actual deterministic frame capture",
+      "status": "PASS"
+    },
+    {
+      "name": "scene server blocks project state",
+      "status": "PASS"
+    },
+    {
+      "name": "editor HTTP requires CSRF token",
+      "status": "PASS"
+    },
+    {
+      "name": "scene iframe has no desktop bridge or external fetch",
+      "status": "PASS"
+    },
+    {
+      "name": "real MP4 encode probe and full decode",
+      "status": "PASS"
+    },
+    {
+      "name": "native exported video playback advances",
+      "status": "PASS"
+    },
+    {
+      "name": "OS encrypted credential persistence",
+      "status": "PASS"
+    },
+    {
+      "name": "native restart restores project conversation and settings",
+      "status": "PASS"
+    },
+    {
+      "name": "compact desktop has no page overflow",
+      "status": "PASS"
+    }
+  ],
+  "packageChecks": [
+    {
+      "name": "relocated app starts outside source workspace",
+      "status": "PASS"
+    },
+    {
+      "name": "blank storyboard graph",
+      "status": "PASS"
+    },
+    {
+      "name": "manual graph adds three connected shots",
+      "status": "PASS"
+    },
+    {
+      "name": "manual storyboard drag updates graph order",
+      "status": "PASS"
+    },
+    {
+      "name": "manual storyboard renders without conversation",
+      "status": "PASS"
+    },
+    {
+      "name": "preview iframe ready handshake",
+      "status": "PASS"
+    },
+    {
+      "name": "UI source edit commits with CAS and real runtime check",
+      "status": "PASS"
+    }
+  ],
+  "actualMedia": {
+    "width": 640,
+    "height": 360,
+    "fps": "24/1",
+    "duration": 6,
+    "frames": 144,
+    "videoCodec": "h264",
+    "audioCodec": "aac",
+    "audio": "synthetic fixture tone",
+    "fullDecode": "PASS",
+    "nativePlayback": "PASS",
+    "sha256": "090660aba36cf5c93429189190cf38d84c59d3906d9f13c81723226494b27e22"
+  },
+  "scope": {
+    "realProvider": "NOT_CHECKED",
+    "modelImagePixels": "NOT_IMPLEMENTED",
+    "humanFullViewing": "NOT_CHECKED",
+    "crossMachine": "NOT_CHECKED",
+    "publicDistribution": "NOT_CHECKED"
+  }
+}

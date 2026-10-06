@@ -1,0 +1,464 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "art-recipe",
+  "version": "1.0.0",
+  "status": "design_proposal",
+  "provenance": {
+    "origin": "original_design_for_this_workpack",
+    "externalArtAssets": [],
+    "implementationStatus": "not_implemented",
+    "performanceStatus": "not_measured"
+  },
+  "typography": {
+    "units": "pixels_at_short_edge_1080",
+    "fontFamilies": {
+      "primary": [
+        "PingFang SC",
+        "Microsoft YaHei",
+        "Noto Sans SC",
+        "sans-serif"
+      ],
+      "technical": [
+        "Noto Sans Mono CJK SC",
+        "Noto Sans SC",
+        "monospace"
+      ]
+    },
+    "roles": {
+      "title": {
+        "sizeAtShortEdge1080": 70,
+        "weight": 700,
+        "lineHeightRatio": 1.18
+      },
+      "lead": {
+        "sizeAtShortEdge1080": 48,
+        "weight": 600,
+        "lineHeightRatio": 1.35
+      },
+      "body": {
+        "sizeAtShortEdge1080": 38,
+        "weight": 400,
+        "lineHeightRatio": 1.48
+      },
+      "label": {
+        "sizeAtShortEdge1080": 30,
+        "weight": 600,
+        "lineHeightRatio": 1.35
+      },
+      "caption": {
+        "sizeAtShortEdge1080": 32,
+        "weight": 400,
+        "lineHeightRatio": 1.42
+      }
+    },
+    "cjk": {
+      "trackingEm": 0,
+      "lineBreakStrategy": "semantic_phrase_then_width_check",
+      "avoidLineStart": [
+        "，",
+        "。",
+        "、",
+        "；",
+        "：",
+        "！",
+        "？",
+        "）",
+        "】",
+        "》"
+      ],
+      "avoidLineEnd": [
+        "（",
+        "【",
+        "《"
+      ],
+      "keepUnitsWithNumbers": true,
+      "maxTitleLines": 2,
+      "useCondensedFontToFit": false,
+      "overflowPolicy": "rewrite_or_split_scene_before_shrinking"
+    },
+    "fontPolicy": {
+      "availability": "unverified_on_target_machine",
+      "bundledFontsNeedSourceRecord": true,
+      "fallbackChangesRequireLayoutReview": true,
+      "glyphCoverageCheckRequired": true,
+      "fontLicenseVerified": false
+    }
+  },
+  "layout": {
+    "units": "normalized-viewport",
+    "variants": {
+      "landscape": {
+        "referenceSize": {
+          "width": 1920,
+          "height": 1080
+        },
+        "safeInsets": {
+          "top": 0.045,
+          "right": 0.045,
+          "bottom": 0.035,
+          "left": 0.045
+        },
+        "regions": [
+          {
+            "id": "question",
+            "x": 0.06,
+            "y": 0.06,
+            "w": 0.88,
+            "h": 0.12
+          },
+          {
+            "id": "diagram",
+            "x": 0.06,
+            "y": 0.225,
+            "w": 0.61,
+            "h": 0.51
+          },
+          {
+            "id": "rule",
+            "x": 0.725,
+            "y": 0.27,
+            "w": 0.215,
+            "h": 0.36
+          },
+          {
+            "id": "state",
+            "x": 0.06,
+            "y": 0.78,
+            "w": 0.88,
+            "h": 0.055
+          },
+          {
+            "id": "caption",
+            "x": 0.06,
+            "y": 0.88,
+            "w": 0.88,
+            "h": 0.07
+          }
+        ],
+        "readingOrder": [
+          "question",
+          "diagram",
+          "rule",
+          "state",
+          "caption"
+        ],
+        "compositionRule": "diagram_then_single_rule_with_state_legend"
+      },
+      "portrait": {
+        "referenceSize": {
+          "width": 1080,
+          "height": 1920
+        },
+        "safeInsets": {
+          "top": 0.035,
+          "right": 0.06,
+          "bottom": 0.025,
+          "left": 0.06
+        },
+        "regions": [
+          {
+            "id": "question",
+            "x": 0.075,
+            "y": 0.055,
+            "w": 0.85,
+            "h": 0.135
+          },
+          {
+            "id": "diagram",
+            "x": 0.075,
+            "y": 0.235,
+            "w": 0.85,
+            "h": 0.355
+          },
+          {
+            "id": "rule",
+            "x": 0.075,
+            "y": 0.64,
+            "w": 0.85,
+            "h": 0.12
+          },
+          {
+            "id": "state",
+            "x": 0.075,
+            "y": 0.805,
+            "w": 0.85,
+            "h": 0.05
+          },
+          {
+            "id": "caption",
+            "x": 0.075,
+            "y": 0.905,
+            "w": 0.85,
+            "h": 0.05
+          }
+        ],
+        "readingOrder": [
+          "question",
+          "diagram",
+          "rule",
+          "state",
+          "caption"
+        ],
+        "compositionRule": "vertical_process_or_sequential_nodes_instead_of_shrunken_graph"
+      }
+    },
+    "origin": "top-left",
+    "overlapPolicy": "annotation_lines_may_overlap_object_region_but_must_not_obscure_labels_or_captions"
+  },
+  "motion": {
+    "timeUnit": "seconds",
+    "clockPolicy": "explicit_time_or_frame_index",
+    "seedPolicy": "stable_seed_for_procedural_variation",
+    "presets": [
+      {
+        "id": "state-change",
+        "duration": 0.4,
+        "description": "对象在既定位置改变状态，完成后停留；状态含文字或形状标记。",
+        "allowedProperties": [
+          "fill",
+          "shape_marker",
+          "opacity"
+        ]
+      },
+      {
+        "id": "relation-trace",
+        "duration": 0.5,
+        "description": "从源对象沿单条关系追踪到目标；关系类型以线型和标签共同表示。",
+        "allowedProperties": [
+          "path_progress",
+          "marker_position"
+        ]
+      }
+    ],
+    "reducedMotion": {
+      "strategy": "static_states_with_short_dissolve",
+      "maxTransitionSeconds": 0.16,
+      "disable": [
+        "parallax",
+        "camera_orbit",
+        "oscillation",
+        "stroke_scribble"
+      ]
+    },
+    "implementationStatus": "not_implemented"
+  },
+  "adaptation": {
+    "aspectRatio": {
+      "supportedProfiles": [
+        "landscape",
+        "portrait"
+      ],
+      "policy": "recompose_regions_and_sequence_before_scaling",
+      "otherRatios": "requires_project_override_and_visual_review"
+    },
+    "chineseReading": {
+      "countUnit": "visible_grapheme_clusters_for_chinese_dominant_copy",
+      "startingRateCharsPerSecond": 3.5,
+      "minReadingHoldSeconds": 2.5,
+      "holdStarts": "after_reveal_and_layout_settle",
+      "rateStatus": "conservative_design_default_not_readability_evidence",
+      "speechPolicy": "use_measured_voice_duration_and_review_subtitle_sync"
+    },
+    "density": {
+      "maxTitleChars": 18,
+      "maxBodyCharsPerLine": 18,
+      "maxVisibleBodyChars": 54,
+      "maxSimultaneousReadingZones": 2,
+      "overflowAction": [
+        "shorten_copy",
+        "split_scene",
+        "move_supporting_detail_to_companion_document"
+      ],
+      "budgetStatus": "starting_defaults_require_device_review"
+    },
+    "roleScale": {
+      "landscape": {
+        "title": 1,
+        "lead": 1,
+        "body": 1,
+        "label": 1,
+        "caption": 1
+      },
+      "portrait": {
+        "title": 0.92,
+        "lead": 1,
+        "body": 1.08,
+        "label": 1.08,
+        "caption": 1.08
+      }
+    },
+    "accessibility": {
+      "meaningMustNotDependOnColorOnly": true,
+      "contrastMeasuredOnFinalComposite": true,
+      "captionSafeAreaRequired": true,
+      "mobileReadingReviewRequired": true,
+      "audioOnlyMeaningNeedsVisibleEquivalent": true,
+      "verified": false
+    },
+    "diagramPolicy": {
+      "maxActiveNodes": 4,
+      "maxNewRelationsPerBeat": 1,
+      "portraitFlow": "top_to_bottom",
+      "budgetStatus": "design_default_not_measured"
+    }
+  },
+  "id": "mechanism-board",
+  "nameZh": "机制板",
+  "summary": "用少量二维对象、明确的关系和逐步状态变化解释一个机制，文字只承担对象名与关键规则。",
+  "intent": {
+    "useCases": [
+      "算法或系统流程",
+      "物理机制示意",
+      "业务规则说明",
+      "教学图解"
+    ],
+    "goals": [
+      "每次只引入一个新关系",
+      "把状态与变化分开阅读"
+    ],
+    "notFor": [
+      "高密度节点拓扑全景",
+      "把示意动画当作实验测量"
+    ]
+  },
+  "palette": {
+    "canvas": "#F1F4EF",
+    "surface": "#FFFFFF",
+    "text": "#21322C",
+    "mutedText": "#55685E",
+    "accent": "#426E59",
+    "positive": "#3F7853",
+    "caution": "#946D2E",
+    "critical": "#A05245",
+    "border": "#BCCBBB",
+    "background": "#F1F4EF",
+    "primary": "#426E59",
+    "muted": "#55685E"
+  },
+  "scenePrimitives": [
+    {
+      "id": "state-node",
+      "purpose": "展示一个对象及其当前状态",
+      "slots": [
+        {
+          "id": "object",
+          "semanticRole": "object_label",
+          "required": true,
+          "maxChars": 10,
+          "maxLines": 1
+        },
+        {
+          "id": "state",
+          "semanticRole": "current_state",
+          "required": true,
+          "maxChars": 12,
+          "maxLines": 1
+        },
+        {
+          "id": "value",
+          "semanticRole": "value_with_unit",
+          "required": false,
+          "maxChars": 12,
+          "maxLines": 1
+        }
+      ],
+      "motionPreset": "state-change",
+      "textBudget": {
+        "maxVisibleBodyChars": 24,
+        "maxSimultaneousReadingZones": 1
+      }
+    },
+    {
+      "id": "relationship",
+      "purpose": "说明有向或无向的关系",
+      "slots": [
+        {
+          "id": "source",
+          "semanticRole": "source_object_id",
+          "required": true,
+          "maxChars": 16,
+          "maxLines": 1
+        },
+        {
+          "id": "target",
+          "semanticRole": "target_object_id",
+          "required": true,
+          "maxChars": 16,
+          "maxLines": 1
+        },
+        {
+          "id": "relationType",
+          "semanticRole": "causal_flow_association_or_order",
+          "required": true,
+          "maxChars": 10,
+          "maxLines": 1
+        },
+        {
+          "id": "rule",
+          "semanticRole": "relationship_rule",
+          "required": true,
+          "maxChars": 24,
+          "maxLines": 2
+        }
+      ],
+      "motionPreset": "relation-trace",
+      "textBudget": {
+        "maxVisibleBodyChars": 36,
+        "maxSimultaneousReadingZones": 1
+      }
+    },
+    {
+      "id": "mechanism-step",
+      "purpose": "一条输入到输出的规则",
+      "slots": [
+        {
+          "id": "input",
+          "semanticRole": "input_state",
+          "required": true,
+          "maxChars": 14,
+          "maxLines": 2
+        },
+        {
+          "id": "rule",
+          "semanticRole": "transformation_rule",
+          "required": true,
+          "maxChars": 24,
+          "maxLines": 2
+        },
+        {
+          "id": "output",
+          "semanticRole": "output_state",
+          "required": true,
+          "maxChars": 14,
+          "maxLines": 2
+        },
+        {
+          "id": "modelNote",
+          "semanticRole": "schematic_or_model_limit",
+          "required": true,
+          "maxChars": 24,
+          "maxLines": 2
+        }
+      ],
+      "motionPreset": "state-change",
+      "textBudget": {
+        "maxVisibleBodyChars": 60,
+        "maxSimultaneousReadingZones": 1
+      }
+    }
+  ],
+  "avoidances": [
+    "箭头方向不明",
+    "仅用颜色区分状态",
+    "一次引入所有节点与文字",
+    "将关联线画成因果线",
+    "数据随动画变化却没有单位与模型范围"
+  ],
+  "baseVersion": "0.1.0",
+  "compatibility": {
+    "workpackBaseRange": ">=0.1.0 <0.2.0",
+    "artSchemaRange": ">=1.0.0 <2.0.0",
+    "compatibilityStatus": "declared_not_runtime_verified",
+    "migrationPolicy": "reject_unknown_major_and_preserve_project_copy"
+  }
+}

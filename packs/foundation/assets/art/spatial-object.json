@@ -1,0 +1,462 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "art-recipe",
+  "version": "1.0.0",
+  "status": "design_proposal",
+  "provenance": {
+    "origin": "original_design_for_this_workpack",
+    "externalArtAssets": [],
+    "implementationStatus": "not_implemented",
+    "performanceStatus": "not_measured"
+  },
+  "typography": {
+    "units": "pixels_at_short_edge_1080",
+    "fontFamilies": {
+      "primary": [
+        "PingFang SC",
+        "Microsoft YaHei",
+        "Noto Sans SC",
+        "sans-serif"
+      ],
+      "technical": [
+        "Noto Sans Mono CJK SC",
+        "Noto Sans SC",
+        "monospace"
+      ]
+    },
+    "roles": {
+      "title": {
+        "sizeAtShortEdge1080": 68,
+        "weight": 700,
+        "lineHeightRatio": 1.18
+      },
+      "lead": {
+        "sizeAtShortEdge1080": 48,
+        "weight": 600,
+        "lineHeightRatio": 1.35
+      },
+      "body": {
+        "sizeAtShortEdge1080": 38,
+        "weight": 400,
+        "lineHeightRatio": 1.48
+      },
+      "label": {
+        "sizeAtShortEdge1080": 30,
+        "weight": 600,
+        "lineHeightRatio": 1.35
+      },
+      "caption": {
+        "sizeAtShortEdge1080": 32,
+        "weight": 400,
+        "lineHeightRatio": 1.42
+      }
+    },
+    "cjk": {
+      "trackingEm": 0,
+      "lineBreakStrategy": "semantic_phrase_then_width_check",
+      "avoidLineStart": [
+        "，",
+        "。",
+        "、",
+        "；",
+        "：",
+        "！",
+        "？",
+        "）",
+        "】",
+        "》"
+      ],
+      "avoidLineEnd": [
+        "（",
+        "【",
+        "《"
+      ],
+      "keepUnitsWithNumbers": true,
+      "maxTitleLines": 2,
+      "useCondensedFontToFit": false,
+      "overflowPolicy": "rewrite_or_split_scene_before_shrinking"
+    },
+    "fontPolicy": {
+      "availability": "unverified_on_target_machine",
+      "bundledFontsNeedSourceRecord": true,
+      "fallbackChangesRequireLayoutReview": true,
+      "glyphCoverageCheckRequired": true,
+      "fontLicenseVerified": false
+    }
+  },
+  "layout": {
+    "units": "normalized-viewport",
+    "variants": {
+      "landscape": {
+        "referenceSize": {
+          "width": 1920,
+          "height": 1080
+        },
+        "safeInsets": {
+          "top": 0.04,
+          "right": 0.04,
+          "bottom": 0.025,
+          "left": 0.04
+        },
+        "regions": [
+          {
+            "id": "title",
+            "x": 0.06,
+            "y": 0.065,
+            "w": 0.88,
+            "h": 0.12
+          },
+          {
+            "id": "object",
+            "x": 0.2,
+            "y": 0.225,
+            "w": 0.6,
+            "h": 0.47
+          },
+          {
+            "id": "annotationLeft",
+            "x": 0.06,
+            "y": 0.3,
+            "w": 0.19,
+            "h": 0.34
+          },
+          {
+            "id": "annotationRight",
+            "x": 0.75,
+            "y": 0.3,
+            "w": 0.19,
+            "h": 0.34
+          },
+          {
+            "id": "specification",
+            "x": 0.06,
+            "y": 0.76,
+            "w": 0.88,
+            "h": 0.07
+          },
+          {
+            "id": "caption",
+            "x": 0.06,
+            "y": 0.9,
+            "w": 0.88,
+            "h": 0.055
+          }
+        ],
+        "readingOrder": [
+          "title",
+          "object",
+          "annotationLeft",
+          "annotationRight",
+          "specification",
+          "caption"
+        ],
+        "compositionRule": "center_object_two_short_nonoverlapping_callouts"
+      },
+      "portrait": {
+        "referenceSize": {
+          "width": 1080,
+          "height": 1920
+        },
+        "safeInsets": {
+          "top": 0.035,
+          "right": 0.06,
+          "bottom": 0.025,
+          "left": 0.06
+        },
+        "regions": [
+          {
+            "id": "title",
+            "x": 0.075,
+            "y": 0.055,
+            "w": 0.85,
+            "h": 0.12
+          },
+          {
+            "id": "object",
+            "x": 0.1,
+            "y": 0.225,
+            "w": 0.8,
+            "h": 0.36
+          },
+          {
+            "id": "annotationLeft",
+            "x": 0.075,
+            "y": 0.635,
+            "w": 0.405,
+            "h": 0.12
+          },
+          {
+            "id": "annotationRight",
+            "x": 0.52,
+            "y": 0.635,
+            "w": 0.405,
+            "h": 0.12
+          },
+          {
+            "id": "specification",
+            "x": 0.075,
+            "y": 0.8,
+            "w": 0.85,
+            "h": 0.07
+          },
+          {
+            "id": "caption",
+            "x": 0.075,
+            "y": 0.91,
+            "w": 0.85,
+            "h": 0.05
+          }
+        ],
+        "readingOrder": [
+          "title",
+          "object",
+          "annotationLeft",
+          "annotationRight",
+          "specification",
+          "caption"
+        ],
+        "compositionRule": "object_above_callout_cards_with_projected_anchor_lines"
+      }
+    },
+    "origin": "top-left",
+    "overlapPolicy": "annotation_lines_may_overlap_object_region_but_must_not_obscure_labels_or_captions"
+  },
+  "motion": {
+    "timeUnit": "seconds",
+    "clockPolicy": "explicit_time_or_frame_index",
+    "seedPolicy": "stable_seed_for_procedural_variation",
+    "presets": [
+      {
+        "id": "purposeful-orbit",
+        "duration": 1.2,
+        "description": "仅为显示被遮挡的部件做一次有限视角变化，之后停稳；标注由同一投影计算。",
+        "allowedProperties": [
+          "camera_position",
+          "camera_target"
+        ]
+      },
+      {
+        "id": "part-reveal",
+        "duration": 0.55,
+        "description": "按部件层级逐步显示结构或轻微分离；不制造未经说明的物理运动。",
+        "allowedProperties": [
+          "part_position",
+          "opacity"
+        ]
+      }
+    ],
+    "reducedMotion": {
+      "strategy": "static_states_with_short_dissolve",
+      "maxTransitionSeconds": 0.16,
+      "disable": [
+        "parallax",
+        "camera_orbit",
+        "oscillation",
+        "stroke_scribble"
+      ]
+    },
+    "implementationStatus": "not_implemented"
+  },
+  "adaptation": {
+    "aspectRatio": {
+      "supportedProfiles": [
+        "landscape",
+        "portrait"
+      ],
+      "policy": "recompose_regions_and_sequence_before_scaling",
+      "otherRatios": "requires_project_override_and_visual_review"
+    },
+    "chineseReading": {
+      "countUnit": "visible_grapheme_clusters_for_chinese_dominant_copy",
+      "startingRateCharsPerSecond": 3.5,
+      "minReadingHoldSeconds": 2.5,
+      "holdStarts": "after_reveal_and_layout_settle",
+      "rateStatus": "conservative_design_default_not_readability_evidence",
+      "speechPolicy": "use_measured_voice_duration_and_review_subtitle_sync"
+    },
+    "density": {
+      "maxTitleChars": 18,
+      "maxBodyCharsPerLine": 16,
+      "maxVisibleBodyChars": 46,
+      "maxSimultaneousReadingZones": 2,
+      "overflowAction": [
+        "shorten_copy",
+        "split_scene",
+        "move_supporting_detail_to_companion_document"
+      ],
+      "budgetStatus": "starting_defaults_require_device_review"
+    },
+    "roleScale": {
+      "landscape": {
+        "title": 1,
+        "lead": 1,
+        "body": 1,
+        "label": 1,
+        "caption": 1
+      },
+      "portrait": {
+        "title": 0.92,
+        "lead": 1,
+        "body": 1.08,
+        "label": 1.08,
+        "caption": 1.08
+      }
+    },
+    "accessibility": {
+      "meaningMustNotDependOnColorOnly": true,
+      "contrastMeasuredOnFinalComposite": true,
+      "captionSafeAreaRequired": true,
+      "mobileReadingReviewRequired": true,
+      "audioOnlyMeaningNeedsVisibleEquivalent": true,
+      "verified": false
+    },
+    "spatialPolicy": {
+      "maxCalloutsVisible": 2,
+      "anchorCoordinates": "world_space_projected_per_frame",
+      "qualityTiers": [
+        "flat_preview",
+        "lit_preview",
+        "final_optional_post"
+      ],
+      "qualityStatus": "design_options_no_renderer_implemented"
+    }
+  },
+  "id": "spatial-object",
+  "nameZh": "空间标注",
+  "summary": "用稳定的对象轮廓、一个有目的的视角变化和少量空间标注说明产品形态或空间结构。",
+  "intent": {
+    "useCases": [
+      "三维产品构造",
+      "空间配置",
+      "部件关系",
+      "设备工作路径"
+    ],
+    "goals": [
+      "对象先清楚再解释空间",
+      "相机变化服务特定信息"
+    ],
+    "notFor": [
+      "未经测量的真实尺寸宣传",
+      "依赖昂贵后处理掩盖不清楚的模型"
+    ]
+  },
+  "palette": {
+    "canvas": "#101820",
+    "surface": "#22313B",
+    "text": "#EFF4F5",
+    "mutedText": "#B5C8D0",
+    "accent": "#8BCFD0",
+    "positive": "#ACD1B2",
+    "caution": "#E7C18B",
+    "critical": "#E7A99E",
+    "border": "#516C79",
+    "background": "#101820",
+    "primary": "#8BCFD0",
+    "muted": "#B5C8D0"
+  },
+  "scenePrimitives": [
+    {
+      "id": "object-view",
+      "purpose": "显示可辨识对象与本镜头目的",
+      "slots": [
+        {
+          "id": "objectName",
+          "semanticRole": "object_label",
+          "required": true,
+          "maxChars": 16,
+          "maxLines": 1
+        },
+        {
+          "id": "viewPurpose",
+          "semanticRole": "viewing_goal",
+          "required": true,
+          "maxChars": 24,
+          "maxLines": 2
+        },
+        {
+          "id": "renderKind",
+          "semanticRole": "schematic_or_realistic_render",
+          "required": true,
+          "maxChars": 12,
+          "maxLines": 1
+        }
+      ],
+      "motionPreset": "purposeful-orbit",
+      "textBudget": {
+        "maxVisibleBodyChars": 38,
+        "maxSimultaneousReadingZones": 1
+      }
+    },
+    {
+      "id": "part-callout",
+      "purpose": "标注一项部件功能",
+      "slots": [
+        {
+          "id": "partId",
+          "semanticRole": "scene_part_id",
+          "required": true,
+          "maxChars": 24,
+          "maxLines": 1
+        },
+        {
+          "id": "function",
+          "semanticRole": "part_function",
+          "required": true,
+          "maxChars": 22,
+          "maxLines": 2
+        },
+        {
+          "id": "sourceId",
+          "semanticRole": "specification_source_id",
+          "required": false,
+          "maxChars": 28,
+          "maxLines": 2
+        }
+      ],
+      "motionPreset": "part-reveal",
+      "textBudget": {
+        "maxVisibleBodyChars": 34,
+        "maxSimultaneousReadingZones": 1
+      }
+    },
+    {
+      "id": "dimension-note",
+      "purpose": "显示已核实或明确示意的量",
+      "slots": [
+        {
+          "id": "value",
+          "semanticRole": "value_with_unit",
+          "required": true,
+          "maxChars": 16,
+          "maxLines": 1
+        },
+        {
+          "id": "basis",
+          "semanticRole": "measurement_or_schematic_basis",
+          "required": true,
+          "maxChars": 24,
+          "maxLines": 2
+        }
+      ],
+      "motionPreset": "part-reveal",
+      "textBudget": {
+        "maxVisibleBodyChars": 38,
+        "maxSimultaneousReadingZones": 1
+      }
+    }
+  ],
+  "avoidances": [
+    "相机不停旋转使字幕无法阅读",
+    "镜头运动后标注仍留在旧屏幕坐标",
+    "高亮反射盖住部件轮廓",
+    "示意模型给出未核实尺寸",
+    "将材质渲染写成物理或性能验证"
+  ],
+  "baseVersion": "0.1.0",
+  "compatibility": {
+    "workpackBaseRange": ">=0.1.0 <0.2.0",
+    "artSchemaRange": ">=1.0.0 <2.0.0",
+    "compatibilityStatus": "declared_not_runtime_verified",
+    "migrationPolicy": "reject_unknown_major_and_preserve_project_copy"
+  }
+}

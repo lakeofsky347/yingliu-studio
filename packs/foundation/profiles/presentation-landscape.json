@@ -1,0 +1,5 @@
+{
+  "schemaVersion": "1.0.0", "kind": "delivery-profile", "id": "presentation-landscape", "compatibleBase": "0.1.0",
+  "overrides": {"target": {"width": 1280, "height": 720}},
+  "notes": "讲解与演示起点。正式分辨率可调整；内容阅读时间仍由样片确定。"
+}

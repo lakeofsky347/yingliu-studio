@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.local/
+artifacts/
+.env
+.env.*
+*.log
+*.tgz
+*.zip
+.DS_Store
+coverage/
+credentials*

@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "1.0.0", "kind": "engine-adapter-design", "id": "my-engine", "version": "0.1.0", "compatibleBase": "0.1.0", "contractVersion": "1.0.0",
+  "status": "design-template-not-implemented",
+  "engine": {"name": "填写引擎名", "version": "填写精确版本", "licenseSource": "填写一级来源"},
+  "captureMode": "frame", "nativeTimeUnit": "填写frame/second/millisecond/other",
+  "capabilities": {"arbitrarySeek": false, "deterministicWithinEnvironment": false, "externalMedia": false},
+  "supportedFields": [], "unsupportedFields": [], "readinessRules": [], "failureFallback": [],
+  "permissions": [], "validationEvidence": []
+}

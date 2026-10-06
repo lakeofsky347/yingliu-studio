@@ -1,0 +1,435 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "art-recipe",
+  "version": "1.0.0",
+  "status": "design_proposal",
+  "provenance": {
+    "origin": "original_design_for_this_workpack",
+    "externalArtAssets": [],
+    "implementationStatus": "not_implemented",
+    "performanceStatus": "not_measured"
+  },
+  "typography": {
+    "units": "pixels_at_short_edge_1080",
+    "fontFamilies": {
+      "primary": [
+        "PingFang SC",
+        "Microsoft YaHei",
+        "Noto Sans SC",
+        "sans-serif"
+      ],
+      "technical": [
+        "Noto Sans Mono CJK SC",
+        "Noto Sans SC",
+        "monospace"
+      ]
+    },
+    "roles": {
+      "title": {
+        "sizeAtShortEdge1080": 72,
+        "weight": 700,
+        "lineHeightRatio": 1.18
+      },
+      "lead": {
+        "sizeAtShortEdge1080": 48,
+        "weight": 600,
+        "lineHeightRatio": 1.35
+      },
+      "body": {
+        "sizeAtShortEdge1080": 38,
+        "weight": 400,
+        "lineHeightRatio": 1.48
+      },
+      "label": {
+        "sizeAtShortEdge1080": 30,
+        "weight": 600,
+        "lineHeightRatio": 1.35
+      },
+      "caption": {
+        "sizeAtShortEdge1080": 32,
+        "weight": 400,
+        "lineHeightRatio": 1.42
+      }
+    },
+    "cjk": {
+      "trackingEm": 0,
+      "lineBreakStrategy": "semantic_phrase_then_width_check",
+      "avoidLineStart": [
+        "，",
+        "。",
+        "、",
+        "；",
+        "：",
+        "！",
+        "？",
+        "）",
+        "】",
+        "》"
+      ],
+      "avoidLineEnd": [
+        "（",
+        "【",
+        "《"
+      ],
+      "keepUnitsWithNumbers": true,
+      "maxTitleLines": 2,
+      "useCondensedFontToFit": false,
+      "overflowPolicy": "rewrite_or_split_scene_before_shrinking"
+    },
+    "fontPolicy": {
+      "availability": "unverified_on_target_machine",
+      "bundledFontsNeedSourceRecord": true,
+      "fallbackChangesRequireLayoutReview": true,
+      "glyphCoverageCheckRequired": true,
+      "fontLicenseVerified": false
+    }
+  },
+  "layout": {
+    "units": "normalized-viewport",
+    "variants": {
+      "landscape": {
+        "referenceSize": {
+          "width": 1920,
+          "height": 1080
+        },
+        "safeInsets": {
+          "top": 0.035,
+          "right": 0.045,
+          "bottom": 0.025,
+          "left": 0.045
+        },
+        "regions": [
+          {
+            "id": "title",
+            "x": 0.06,
+            "y": 0.055,
+            "w": 0.88,
+            "h": 0.12
+          },
+          {
+            "id": "action",
+            "x": 0.075,
+            "y": 0.23,
+            "w": 0.59,
+            "h": 0.48
+          },
+          {
+            "id": "storyNote",
+            "x": 0.73,
+            "y": 0.29,
+            "w": 0.2,
+            "h": 0.29
+          },
+          {
+            "id": "result",
+            "x": 0.075,
+            "y": 0.77,
+            "w": 0.85,
+            "h": 0.065
+          },
+          {
+            "id": "caption",
+            "x": 0.075,
+            "y": 0.89,
+            "w": 0.85,
+            "h": 0.065
+          }
+        ],
+        "readingOrder": [
+          "title",
+          "action",
+          "storyNote",
+          "result",
+          "caption"
+        ],
+        "compositionRule": "one_character_action_and_one_short_narrative_note"
+      },
+      "portrait": {
+        "referenceSize": {
+          "width": 1080,
+          "height": 1920
+        },
+        "safeInsets": {
+          "top": 0.03,
+          "right": 0.06,
+          "bottom": 0.025,
+          "left": 0.06
+        },
+        "regions": [
+          {
+            "id": "title",
+            "x": 0.075,
+            "y": 0.05,
+            "w": 0.85,
+            "h": 0.13
+          },
+          {
+            "id": "action",
+            "x": 0.09,
+            "y": 0.225,
+            "w": 0.82,
+            "h": 0.34
+          },
+          {
+            "id": "storyNote",
+            "x": 0.075,
+            "y": 0.61,
+            "w": 0.85,
+            "h": 0.125
+          },
+          {
+            "id": "result",
+            "x": 0.075,
+            "y": 0.79,
+            "w": 0.85,
+            "h": 0.065
+          },
+          {
+            "id": "caption",
+            "x": 0.075,
+            "y": 0.9,
+            "w": 0.85,
+            "h": 0.055
+          }
+        ],
+        "readingOrder": [
+          "title",
+          "action",
+          "storyNote",
+          "result",
+          "caption"
+        ],
+        "compositionRule": "action_then_narrative_note_without_speech_bubble_clutter"
+      }
+    },
+    "origin": "top-left",
+    "overlapPolicy": "annotation_lines_may_overlap_object_region_but_must_not_obscure_labels_or_captions"
+  },
+  "motion": {
+    "timeUnit": "seconds",
+    "clockPolicy": "explicit_time_or_frame_index",
+    "seedPolicy": "stable_seed_for_procedural_variation",
+    "presets": [
+      {
+        "id": "purpose-action-rest",
+        "duration": 0.9,
+        "description": "以预备、动作、落定三个阶段表达一个目的；角色姿态由明确关键状态插值。",
+        "allowedProperties": [
+          "pose",
+          "position"
+        ]
+      },
+      {
+        "id": "quiet-stroke",
+        "duration": 0.6,
+        "description": "单条重要轮廓分段显现，完成后保持；纸面扰动只用固定种子。",
+        "allowedProperties": [
+          "stroke_progress",
+          "opacity"
+        ]
+      }
+    ],
+    "reducedMotion": {
+      "strategy": "static_states_with_short_dissolve",
+      "maxTransitionSeconds": 0.16,
+      "disable": [
+        "parallax",
+        "camera_orbit",
+        "oscillation",
+        "stroke_scribble"
+      ]
+    },
+    "implementationStatus": "not_implemented"
+  },
+  "adaptation": {
+    "aspectRatio": {
+      "supportedProfiles": [
+        "landscape",
+        "portrait"
+      ],
+      "policy": "recompose_regions_and_sequence_before_scaling",
+      "otherRatios": "requires_project_override_and_visual_review"
+    },
+    "chineseReading": {
+      "countUnit": "visible_grapheme_clusters_for_chinese_dominant_copy",
+      "startingRateCharsPerSecond": 3.5,
+      "minReadingHoldSeconds": 2.5,
+      "holdStarts": "after_reveal_and_layout_settle",
+      "rateStatus": "conservative_design_default_not_readability_evidence",
+      "speechPolicy": "use_measured_voice_duration_and_review_subtitle_sync"
+    },
+    "density": {
+      "maxTitleChars": 18,
+      "maxBodyCharsPerLine": 18,
+      "maxVisibleBodyChars": 48,
+      "maxSimultaneousReadingZones": 1,
+      "overflowAction": [
+        "shorten_copy",
+        "split_scene",
+        "move_supporting_detail_to_companion_document"
+      ],
+      "budgetStatus": "starting_defaults_require_device_review"
+    },
+    "roleScale": {
+      "landscape": {
+        "title": 1,
+        "lead": 1,
+        "body": 1,
+        "label": 1,
+        "caption": 1
+      },
+      "portrait": {
+        "title": 0.92,
+        "lead": 1,
+        "body": 1.08,
+        "label": 1.08,
+        "caption": 1.08
+      }
+    },
+    "accessibility": {
+      "meaningMustNotDependOnColorOnly": true,
+      "contrastMeasuredOnFinalComposite": true,
+      "captionSafeAreaRequired": true,
+      "mobileReadingReviewRequired": true,
+      "audioOnlyMeaningNeedsVisibleEquivalent": true,
+      "verified": false
+    },
+    "characterPolicy": {
+      "maxPrimaryCharactersPerShot": 1,
+      "maxMeaningfulActionsPerShot": 1,
+      "modelSheetNeededForRecurringCharacter": true,
+      "drawingAssetStatus": "none_created_only_recipe_data"
+    }
+  },
+  "id": "narrated-sketch",
+  "nameZh": "叙事线稿",
+  "summary": "用少量原创线稿对象和温和色块串联人物处境、动作与结果，作为故事型解释的可选方向。",
+  "intent": {
+    "useCases": [
+      "个人经历讲述",
+      "概念故事",
+      "教学比喻",
+      "温和的品牌叙述"
+    ],
+    "goals": [
+      "角色目的与变化清楚",
+      "比喻范围不掩盖事实"
+    ],
+    "notFor": [
+      "复现现成角色或他人插画",
+      "需要精确写实表演的长剧情"
+    ]
+  },
+  "palette": {
+    "canvas": "#F5EDDD",
+    "surface": "#FFF9EF",
+    "text": "#3A3531",
+    "mutedText": "#70645C",
+    "accent": "#9B674C",
+    "positive": "#5C765B",
+    "caution": "#9B7836",
+    "critical": "#A95C51",
+    "border": "#CAB69D",
+    "background": "#F5EDDD",
+    "primary": "#9B674C",
+    "muted": "#70645C"
+  },
+  "scenePrimitives": [
+    {
+      "id": "story-situation",
+      "purpose": "设置一个角色的处境与目标",
+      "slots": [
+        {
+          "id": "characterId",
+          "semanticRole": "original_character_id",
+          "required": true,
+          "maxChars": 20,
+          "maxLines": 1
+        },
+        {
+          "id": "goal",
+          "semanticRole": "character_goal",
+          "required": true,
+          "maxChars": 24,
+          "maxLines": 2
+        },
+        {
+          "id": "context",
+          "semanticRole": "narrative_context",
+          "required": false,
+          "maxChars": 24,
+          "maxLines": 2
+        }
+      ],
+      "motionPreset": "quiet-stroke",
+      "textBudget": {
+        "maxVisibleBodyChars": 46,
+        "maxSimultaneousReadingZones": 1
+      }
+    },
+    {
+      "id": "story-action",
+      "purpose": "表达一项可辨识的行动",
+      "slots": [
+        {
+          "id": "action",
+          "semanticRole": "visible_action",
+          "required": true,
+          "maxChars": 20,
+          "maxLines": 2
+        },
+        {
+          "id": "consequence",
+          "semanticRole": "changed_state",
+          "required": true,
+          "maxChars": 24,
+          "maxLines": 2
+        }
+      ],
+      "motionPreset": "purpose-action-rest",
+      "textBudget": {
+        "maxVisibleBodyChars": 44,
+        "maxSimultaneousReadingZones": 1
+      }
+    },
+    {
+      "id": "analogy-boundary",
+      "purpose": "明确故事比喻与实际命题的关系",
+      "slots": [
+        {
+          "id": "analogy",
+          "semanticRole": "analogy_summary",
+          "required": true,
+          "maxChars": 24,
+          "maxLines": 2
+        },
+        {
+          "id": "boundary",
+          "semanticRole": "where_analogy_stops",
+          "required": true,
+          "maxChars": 32,
+          "maxLines": 2
+        }
+      ],
+      "motionPreset": "quiet-stroke",
+      "textBudget": {
+        "maxVisibleBodyChars": 56,
+        "maxSimultaneousReadingZones": 1
+      }
+    }
+  ],
+  "avoidances": [
+    "每帧无种子抖动造成闪烁",
+    "用现成知名角色替代原创角色",
+    "对长中文正文使用难读手写字",
+    "在一个镜头同时安排多个动作笑点",
+    "让故事比喻充当机制或实验的证明"
+  ],
+  "baseVersion": "0.1.0",
+  "compatibility": {
+    "workpackBaseRange": ">=0.1.0 <0.2.0",
+    "artSchemaRange": ">=1.0.0 <2.0.0",
+    "compatibilityStatus": "declared_not_runtime_verified",
+    "migrationPolicy": "reject_unknown_major_and_preserve_project_copy"
+  }
+}

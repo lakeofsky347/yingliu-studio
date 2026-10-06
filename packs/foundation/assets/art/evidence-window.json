@@ -1,0 +1,432 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "art-recipe",
+  "version": "1.0.0",
+  "status": "design_proposal",
+  "provenance": {
+    "origin": "original_design_for_this_workpack",
+    "externalArtAssets": [],
+    "implementationStatus": "not_implemented",
+    "performanceStatus": "not_measured"
+  },
+  "typography": {
+    "units": "pixels_at_short_edge_1080",
+    "fontFamilies": {
+      "primary": [
+        "PingFang SC",
+        "Microsoft YaHei",
+        "Noto Sans SC",
+        "sans-serif"
+      ],
+      "technical": [
+        "Noto Sans Mono CJK SC",
+        "Noto Sans SC",
+        "monospace"
+      ]
+    },
+    "roles": {
+      "title": {
+        "sizeAtShortEdge1080": 68,
+        "weight": 700,
+        "lineHeightRatio": 1.18
+      },
+      "lead": {
+        "sizeAtShortEdge1080": 48,
+        "weight": 600,
+        "lineHeightRatio": 1.35
+      },
+      "body": {
+        "sizeAtShortEdge1080": 38,
+        "weight": 400,
+        "lineHeightRatio": 1.48
+      },
+      "label": {
+        "sizeAtShortEdge1080": 30,
+        "weight": 600,
+        "lineHeightRatio": 1.35
+      },
+      "caption": {
+        "sizeAtShortEdge1080": 32,
+        "weight": 400,
+        "lineHeightRatio": 1.42
+      }
+    },
+    "cjk": {
+      "trackingEm": 0,
+      "lineBreakStrategy": "semantic_phrase_then_width_check",
+      "avoidLineStart": [
+        "，",
+        "。",
+        "、",
+        "；",
+        "：",
+        "！",
+        "？",
+        "）",
+        "】",
+        "》"
+      ],
+      "avoidLineEnd": [
+        "（",
+        "【",
+        "《"
+      ],
+      "keepUnitsWithNumbers": true,
+      "maxTitleLines": 2,
+      "useCondensedFontToFit": false,
+      "overflowPolicy": "rewrite_or_split_scene_before_shrinking"
+    },
+    "fontPolicy": {
+      "availability": "unverified_on_target_machine",
+      "bundledFontsNeedSourceRecord": true,
+      "fallbackChangesRequireLayoutReview": true,
+      "glyphCoverageCheckRequired": true,
+      "fontLicenseVerified": false
+    }
+  },
+  "layout": {
+    "units": "normalized-viewport",
+    "variants": {
+      "landscape": {
+        "referenceSize": {
+          "width": 1920,
+          "height": 1080
+        },
+        "safeInsets": {
+          "top": 0.045,
+          "right": 0.045,
+          "bottom": 0.045,
+          "left": 0.045
+        },
+        "regions": [
+          {
+            "id": "question",
+            "x": 0.06,
+            "y": 0.06,
+            "w": 0.88,
+            "h": 0.13
+          },
+          {
+            "id": "leftEvidence",
+            "x": 0.06,
+            "y": 0.235,
+            "w": 0.405,
+            "h": 0.43
+          },
+          {
+            "id": "rightEvidence",
+            "x": 0.535,
+            "y": 0.235,
+            "w": 0.405,
+            "h": 0.43
+          },
+          {
+            "id": "interpretation",
+            "x": 0.06,
+            "y": 0.72,
+            "w": 0.88,
+            "h": 0.1
+          },
+          {
+            "id": "caption",
+            "x": 0.06,
+            "y": 0.875,
+            "w": 0.88,
+            "h": 0.07
+          }
+        ],
+        "readingOrder": [
+          "question",
+          "leftEvidence",
+          "rightEvidence",
+          "interpretation",
+          "caption"
+        ],
+        "compositionRule": "equal_windows_shared_axes_and_visible_status"
+      },
+      "portrait": {
+        "referenceSize": {
+          "width": 1080,
+          "height": 1920
+        },
+        "safeInsets": {
+          "top": 0.04,
+          "right": 0.06,
+          "bottom": 0.035,
+          "left": 0.06
+        },
+        "regions": [
+          {
+            "id": "question",
+            "x": 0.075,
+            "y": 0.055,
+            "w": 0.85,
+            "h": 0.12
+          },
+          {
+            "id": "leftEvidence",
+            "x": 0.075,
+            "y": 0.225,
+            "w": 0.85,
+            "h": 0.235
+          },
+          {
+            "id": "rightEvidence",
+            "x": 0.075,
+            "y": 0.52,
+            "w": 0.85,
+            "h": 0.235
+          },
+          {
+            "id": "interpretation",
+            "x": 0.075,
+            "y": 0.8,
+            "w": 0.85,
+            "h": 0.075
+          },
+          {
+            "id": "caption",
+            "x": 0.075,
+            "y": 0.91,
+            "w": 0.85,
+            "h": 0.055
+          }
+        ],
+        "readingOrder": [
+          "question",
+          "leftEvidence",
+          "rightEvidence",
+          "interpretation",
+          "caption"
+        ],
+        "compositionRule": "one_evidence_window_at_a_time_then_joint_summary"
+      }
+    },
+    "origin": "top-left",
+    "overlapPolicy": "annotation_lines_may_overlap_object_region_but_must_not_obscure_labels_or_captions"
+  },
+  "motion": {
+    "timeUnit": "seconds",
+    "clockPolicy": "explicit_time_or_frame_index",
+    "seedPolicy": "stable_seed_for_procedural_variation",
+    "presets": [
+      {
+        "id": "paired-reveal",
+        "duration": 0.36,
+        "description": "两窗共用入场时刻；竖屏依顺序显示并保留窗名。",
+        "allowedProperties": [
+          "opacity"
+        ]
+      },
+      {
+        "id": "difference-focus",
+        "duration": 0.28,
+        "description": "只强调同一维度中的一处差异，其余内容保持位置。",
+        "allowedProperties": [
+          "border_emphasis",
+          "mask"
+        ]
+      }
+    ],
+    "reducedMotion": {
+      "strategy": "static_states_with_short_dissolve",
+      "maxTransitionSeconds": 0.16,
+      "disable": [
+        "parallax",
+        "camera_orbit",
+        "oscillation",
+        "stroke_scribble"
+      ]
+    },
+    "implementationStatus": "not_implemented"
+  },
+  "adaptation": {
+    "aspectRatio": {
+      "supportedProfiles": [
+        "landscape",
+        "portrait"
+      ],
+      "policy": "recompose_regions_and_sequence_before_scaling",
+      "otherRatios": "requires_project_override_and_visual_review",
+      "portraitSequence": "show_first_window_then_second_then_restate_shared_dimension"
+    },
+    "chineseReading": {
+      "countUnit": "visible_grapheme_clusters_for_chinese_dominant_copy",
+      "startingRateCharsPerSecond": 3.5,
+      "minReadingHoldSeconds": 2.5,
+      "holdStarts": "after_reveal_and_layout_settle",
+      "rateStatus": "conservative_design_default_not_readability_evidence",
+      "speechPolicy": "use_measured_voice_duration_and_review_subtitle_sync"
+    },
+    "density": {
+      "maxTitleChars": 22,
+      "maxBodyCharsPerLine": 18,
+      "maxVisibleBodyChars": 64,
+      "maxSimultaneousReadingZones": 2,
+      "overflowAction": [
+        "shorten_copy",
+        "split_scene",
+        "move_supporting_detail_to_companion_document"
+      ],
+      "budgetStatus": "starting_defaults_require_device_review"
+    },
+    "roleScale": {
+      "landscape": {
+        "title": 1,
+        "lead": 1,
+        "body": 1,
+        "label": 1,
+        "caption": 1
+      },
+      "portrait": {
+        "title": 0.92,
+        "lead": 1,
+        "body": 1.08,
+        "label": 1.08,
+        "caption": 1.08
+      }
+    },
+    "accessibility": {
+      "meaningMustNotDependOnColorOnly": true,
+      "contrastMeasuredOnFinalComposite": true,
+      "captionSafeAreaRequired": true,
+      "mobileReadingReviewRequired": true,
+      "audioOnlyMeaningNeedsVisibleEquivalent": true,
+      "verified": false
+    }
+  },
+  "id": "evidence-window",
+  "nameZh": "双窗证据",
+  "summary": "让两个证据视窗共用问题与评价维度，并为每项判断保留可追溯的来源与范围。",
+  "intent": {
+    "useCases": [
+      "方案前后对照",
+      "研究证据与解释",
+      "候选路线比较",
+      "问题与修复结果"
+    ],
+    "goals": [
+      "对照基准明确",
+      "区分观测事实与解释"
+    ],
+    "notFor": [
+      "没有共同维度的强行对照",
+      "把未读项目当作零值"
+    ]
+  },
+  "palette": {
+    "canvas": "#EEF2F4",
+    "surface": "#FFFFFF",
+    "text": "#172630",
+    "mutedText": "#4F6671",
+    "accent": "#285D89",
+    "positive": "#2E685A",
+    "caution": "#856023",
+    "critical": "#984845",
+    "border": "#BCCBD4",
+    "background": "#EEF2F4",
+    "primary": "#285D89",
+    "muted": "#4F6671"
+  },
+  "scenePrimitives": [
+    {
+      "id": "paired-evidence",
+      "purpose": "展示具有相同维度的两个观察",
+      "slots": [
+        {
+          "id": "question",
+          "semanticRole": "comparison_question",
+          "required": true,
+          "maxChars": 22,
+          "maxLines": 2
+        },
+        {
+          "id": "leftLabel",
+          "semanticRole": "evidence_label",
+          "required": true,
+          "maxChars": 10,
+          "maxLines": 1
+        },
+        {
+          "id": "rightLabel",
+          "semanticRole": "evidence_label",
+          "required": true,
+          "maxChars": 10,
+          "maxLines": 1
+        },
+        {
+          "id": "leftSource",
+          "semanticRole": "source_record_id",
+          "required": true,
+          "maxChars": 28,
+          "maxLines": 2
+        },
+        {
+          "id": "rightSource",
+          "semanticRole": "source_record_id",
+          "required": true,
+          "maxChars": 28,
+          "maxLines": 2
+        },
+        {
+          "id": "scope",
+          "semanticRole": "scope_and_denominator",
+          "required": true,
+          "maxChars": 28,
+          "maxLines": 2
+        }
+      ],
+      "motionPreset": "paired-reveal",
+      "textBudget": {
+        "maxVisibleBodyChars": 64,
+        "maxSimultaneousReadingZones": 2
+      }
+    },
+    {
+      "id": "interpretation-strip",
+      "purpose": "在证据之后给出限定范围的解释",
+      "slots": [
+        {
+          "id": "status",
+          "semanticRole": "fact_inference_or_unknown",
+          "required": true,
+          "maxChars": 8,
+          "maxLines": 1
+        },
+        {
+          "id": "statement",
+          "semanticRole": "bounded_interpretation",
+          "required": true,
+          "maxChars": 38,
+          "maxLines": 2
+        },
+        {
+          "id": "limitation",
+          "semanticRole": "limitation",
+          "required": false,
+          "maxChars": 28,
+          "maxLines": 2
+        }
+      ],
+      "motionPreset": "difference-focus",
+      "textBudget": {
+        "maxVisibleBodyChars": 66,
+        "maxSimultaneousReadingZones": 1
+      }
+    }
+  ],
+  "avoidances": [
+    "两窗使用不同轴范围却不标明",
+    "只有胜负色没有评价维度",
+    "把推论标成实测事实",
+    "省掉数据来源与分母",
+    "对照文字和字幕同时争夺同一区域"
+  ],
+  "baseVersion": "0.1.0",
+  "compatibility": {
+    "workpackBaseRange": ">=0.1.0 <0.2.0",
+    "artSchemaRange": ">=1.0.0 <2.0.0",
+    "compatibilityStatus": "declared_not_runtime_verified",
+    "migrationPolicy": "reject_unknown_major_and_preserve_project_copy"
+  }
+}

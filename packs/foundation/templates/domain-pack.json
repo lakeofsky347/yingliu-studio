@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "1.0.0", "kind": "domain-pack-design", "id": "my-domain", "version": "0.1.0", "compatibleBase": "0.1.0",
+  "status": "design-template-not-executed",
+  "purpose": "填写某类内容的语义与镜头选择规则，如课程讲解、数据比较或产品教学",
+  "ownedFields": ["extensions.domain", "claims", "evidence"],
+  "inputRequirements": [], "semanticChecks": [], "sceneSuggestions": [],
+  "mustNotOverride": ["core time units", "adapter capabilities", "user authorization", "evidence status"],
+  "acceptanceFixtures": [], "sources": [], "permissions": []
+}

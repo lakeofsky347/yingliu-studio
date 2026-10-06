@@ -1,0 +1,91 @@
+{
+  "version": "0.1.0",
+  "source": "frontend-video-foundation 0.1.0",
+  "usage": "原始美术和交付规格参考数据；design_proposal不是已实现的渲染风格",
+  "files": [
+    {
+      "path": "assets/art/clear-message.json",
+      "sha256": "cd1af3c3ff5cf804f168f38d02fa5194de117335dd70cd56aa89cccab881fc27"
+    },
+    {
+      "path": "assets/art/evidence-window.json",
+      "sha256": "fbe785a5c9cca1c91e16da37ce1abf42504ba1743a7aea1ccb3fb620fe101f0c"
+    },
+    {
+      "path": "assets/art/mechanism-board.json",
+      "sha256": "115b06571bd1cd65d4c13bc1ddc578dc93cb7ea7df6224a6f64f3c7ff65d681c"
+    },
+    {
+      "path": "assets/art/narrated-sketch.json",
+      "sha256": "b4ca907575e2670ae917b1ff4340be9ff5fff41edc4f28f686c9f9e3dc21c76f"
+    },
+    {
+      "path": "assets/art/operation-notes.json",
+      "sha256": "63c065e9f043867b4e6843892291f7d8ec6ace69806d0d1d4e4e0d18240dc678"
+    },
+    {
+      "path": "assets/art/spatial-object.json",
+      "sha256": "484d188b0c444e401f800116d9a01a179e64d361d353c4fab6e957168561ddb0"
+    },
+    {
+      "path": "profiles/presentation-landscape.json",
+      "sha256": "f7e000c32e287bcda4b8bbdc5480aeb0550036257627e205b58a12ac2e7dfaed"
+    },
+    {
+      "path": "profiles/social-vertical.json",
+      "sha256": "814551471f3da5874758ee201e2f13e96db48aceef26e160e45ac16595e01ccf"
+    },
+    {
+      "path": "templates/adapter-checklist.md",
+      "sha256": "18b174d67af74efcc36feb241a6e85a5a459e1da217d653a1ad71de92f6b75af"
+    },
+    {
+      "path": "templates/art-brief.md",
+      "sha256": "b2135b97473209ae87b9c18ed6737bf239a61ce3760630acbbd60b003d412f46"
+    },
+    {
+      "path": "templates/benchmark-run.json",
+      "sha256": "470807df908368f7b7060b27e32bbe8b9a7b2c3696b4ea06680ef76375a12773"
+    },
+    {
+      "path": "templates/brief.md",
+      "sha256": "5989eaed8ef78178ca41e0bb1d0867eabece0d81bd9c0730d3a98b0740e70639"
+    },
+    {
+      "path": "templates/decision-record.md",
+      "sha256": "948c9f03312d0b683df92f6d4c42fb14e7ccf7d73b77b5a345f3883560e6811b"
+    },
+    {
+      "path": "templates/domain-pack.json",
+      "sha256": "e0296f009e49cad4da6a78c3dbd8d89a0df80d23e3576b80a1c552dfee91a66a"
+    },
+    {
+      "path": "templates/engine-adapter.json",
+      "sha256": "35f05cb85d130ed5978cfc0d810f8493d441384639b4e1a2add550e3e9611da4"
+    },
+    {
+      "path": "templates/handoff.md",
+      "sha256": "ea60dc69cba42a6dcc3a6db18984cfac9967bfd48a107619f4d8e3a0b3c7feef"
+    },
+    {
+      "path": "templates/implementation-plan.md",
+      "sha256": "96e6fc95d7a40d4703a50497903ad542ada3438f0ad0b5c565cd9dc62f23defb"
+    },
+    {
+      "path": "templates/provider-adapter.json",
+      "sha256": "d5bd72b711fbe8b069842c866776f1d0f3ae84c9b23327f8e23ee1c895b70913"
+    },
+    {
+      "path": "templates/qa-review.json",
+      "sha256": "d3837f00ea3901a427a9669e9243d56272e0a6aa9d53b8f37e8bc8ed8821f420"
+    },
+    {
+      "path": "templates/shot-card.md",
+      "sha256": "1a82a0961890d4aa3994149a5bef5a6c6cf7e8e72d2fbb3dd403f2b48a41b9ec"
+    },
+    {
+      "path": "templates/storyboard.md",
+      "sha256": "529e8d56cc6f9044daf632f1b286f254a59db52d06e0652578909070a7a6585b"
+    }
+  ]
+}

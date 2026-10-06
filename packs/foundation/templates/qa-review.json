@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "1.0.0",
+  "artifactHash": null,
+  "projectHash": null,
+  "overall": "NOT_CHECKED",
+  "checks": [
+    {"id": "automated-media", "required": true, "status": "NOT_CHECKED", "method": "workpack.py qa 的结果", "evidence": [], "finding": ""},
+    {"id": "visual-keyframes", "required": true, "status": "NOT_CHECKED", "method": "目标尺寸检查边界与最密关键帧", "evidence": [], "finding": ""},
+    {"id": "full-av-review", "required": true, "status": "NOT_CHECKED", "method": "从头到尾按真实速度听看", "evidence": [], "finding": ""},
+    {"id": "facts-and-rights", "required": true, "status": "NOT_CHECKED", "method": "核对主张、来源、合成标示、素材使用范围", "evidence": [], "finding": ""},
+    {"id": "delivery-readback", "required": true, "status": "NOT_CHECKED", "method": "清单、哈希、解压与可编辑项目回读", "evidence": [], "finding": ""}
+  ]
+}

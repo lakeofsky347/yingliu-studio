@@ -1,0 +1,5 @@
+{
+  "schemaVersion": "1.0.0", "kind": "delivery-profile", "id": "social-vertical", "compatibleBase": "0.1.0",
+  "overrides": {"target": {"width": 720, "height": 1280}},
+  "notes": "横竖适配设计起点；需重看中文排版、safe区和最密帧，不自动声称已适配某平台。"
+}

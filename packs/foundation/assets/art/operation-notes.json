@@ -1,0 +1,420 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "art-recipe",
+  "version": "1.0.0",
+  "status": "design_proposal",
+  "provenance": {
+    "origin": "original_design_for_this_workpack",
+    "externalArtAssets": [],
+    "implementationStatus": "not_implemented",
+    "performanceStatus": "not_measured"
+  },
+  "typography": {
+    "units": "pixels_at_short_edge_1080",
+    "fontFamilies": {
+      "primary": [
+        "PingFang SC",
+        "Microsoft YaHei",
+        "Noto Sans SC",
+        "sans-serif"
+      ],
+      "technical": [
+        "Noto Sans Mono CJK SC",
+        "Noto Sans SC",
+        "monospace"
+      ]
+    },
+    "roles": {
+      "title": {
+        "sizeAtShortEdge1080": 76,
+        "weight": 700,
+        "lineHeightRatio": 1.18
+      },
+      "lead": {
+        "sizeAtShortEdge1080": 48,
+        "weight": 600,
+        "lineHeightRatio": 1.35
+      },
+      "body": {
+        "sizeAtShortEdge1080": 38,
+        "weight": 400,
+        "lineHeightRatio": 1.48
+      },
+      "label": {
+        "sizeAtShortEdge1080": 34,
+        "weight": 600,
+        "lineHeightRatio": 1.35
+      },
+      "caption": {
+        "sizeAtShortEdge1080": 32,
+        "weight": 400,
+        "lineHeightRatio": 1.42
+      }
+    },
+    "cjk": {
+      "trackingEm": 0,
+      "lineBreakStrategy": "semantic_phrase_then_width_check",
+      "avoidLineStart": [
+        "，",
+        "。",
+        "、",
+        "；",
+        "：",
+        "！",
+        "？",
+        "）",
+        "】",
+        "》"
+      ],
+      "avoidLineEnd": [
+        "（",
+        "【",
+        "《"
+      ],
+      "keepUnitsWithNumbers": true,
+      "maxTitleLines": 2,
+      "useCondensedFontToFit": false,
+      "overflowPolicy": "rewrite_or_split_scene_before_shrinking"
+    },
+    "fontPolicy": {
+      "availability": "unverified_on_target_machine",
+      "bundledFontsNeedSourceRecord": true,
+      "fallbackChangesRequireLayoutReview": true,
+      "glyphCoverageCheckRequired": true,
+      "fontLicenseVerified": false
+    }
+  },
+  "layout": {
+    "units": "normalized-viewport",
+    "variants": {
+      "landscape": {
+        "referenceSize": {
+          "width": 1920,
+          "height": 1080
+        },
+        "safeInsets": {
+          "top": 0.035,
+          "right": 0.035,
+          "bottom": 0.025,
+          "left": 0.035
+        },
+        "regions": [
+          {
+            "id": "context",
+            "x": 0.05,
+            "y": 0.055,
+            "w": 0.9,
+            "h": 0.1
+          },
+          {
+            "id": "capture",
+            "x": 0.05,
+            "y": 0.195,
+            "w": 0.66,
+            "h": 0.57
+          },
+          {
+            "id": "notes",
+            "x": 0.765,
+            "y": 0.235,
+            "w": 0.185,
+            "h": 0.47
+          },
+          {
+            "id": "result",
+            "x": 0.05,
+            "y": 0.8,
+            "w": 0.9,
+            "h": 0.065
+          },
+          {
+            "id": "caption",
+            "x": 0.05,
+            "y": 0.9,
+            "w": 0.9,
+            "h": 0.06
+          }
+        ],
+        "readingOrder": [
+          "context",
+          "capture",
+          "notes",
+          "result",
+          "caption"
+        ],
+        "compositionRule": "large_capture_with_separate_note_rail"
+      },
+      "portrait": {
+        "referenceSize": {
+          "width": 1080,
+          "height": 1920
+        },
+        "safeInsets": {
+          "top": 0.025,
+          "right": 0.045,
+          "bottom": 0.025,
+          "left": 0.045
+        },
+        "regions": [
+          {
+            "id": "context",
+            "x": 0.065,
+            "y": 0.045,
+            "w": 0.87,
+            "h": 0.115
+          },
+          {
+            "id": "capture",
+            "x": 0.065,
+            "y": 0.205,
+            "w": 0.87,
+            "h": 0.375
+          },
+          {
+            "id": "notes",
+            "x": 0.065,
+            "y": 0.625,
+            "w": 0.87,
+            "h": 0.12
+          },
+          {
+            "id": "result",
+            "x": 0.065,
+            "y": 0.79,
+            "w": 0.87,
+            "h": 0.08
+          },
+          {
+            "id": "caption",
+            "x": 0.065,
+            "y": 0.915,
+            "w": 0.87,
+            "h": 0.05
+          }
+        ],
+        "readingOrder": [
+          "context",
+          "capture",
+          "notes",
+          "result",
+          "caption"
+        ],
+        "compositionRule": "crop_to_action_with_context_badge_then_notes_below"
+      }
+    },
+    "origin": "top-left",
+    "overlapPolicy": "annotation_lines_may_overlap_object_region_but_must_not_obscure_labels_or_captions"
+  },
+  "motion": {
+    "timeUnit": "seconds",
+    "clockPolicy": "explicit_time_or_frame_index",
+    "seedPolicy": "stable_seed_for_procedural_variation",
+    "presets": [
+      {
+        "id": "callout",
+        "duration": 0.26,
+        "description": "指向线和步骤号在动作稳定后显现；不遮盖被指向的文字。",
+        "allowedProperties": [
+          "stroke_progress",
+          "opacity"
+        ]
+      },
+      {
+        "id": "capture-focus",
+        "duration": 0.42,
+        "description": "在保留上下文标签的前提下，平滑重构图到关键操作区；操作时钟另存。",
+        "allowedProperties": [
+          "crop",
+          "scale",
+          "position"
+        ]
+      }
+    ],
+    "reducedMotion": {
+      "strategy": "static_states_with_short_dissolve",
+      "maxTransitionSeconds": 0.16,
+      "disable": [
+        "parallax",
+        "camera_orbit",
+        "oscillation",
+        "stroke_scribble"
+      ]
+    },
+    "implementationStatus": "not_implemented"
+  },
+  "adaptation": {
+    "aspectRatio": {
+      "supportedProfiles": [
+        "landscape",
+        "portrait"
+      ],
+      "policy": "recompose_regions_and_sequence_before_scaling",
+      "otherRatios": "requires_project_override_and_visual_review",
+      "portraitSequence": "context_then_action_crop_then_readable_result_not_whole_desktop_scale"
+    },
+    "chineseReading": {
+      "countUnit": "visible_grapheme_clusters_for_chinese_dominant_copy",
+      "startingRateCharsPerSecond": 3.5,
+      "minReadingHoldSeconds": 2.5,
+      "holdStarts": "after_reveal_and_layout_settle",
+      "rateStatus": "conservative_design_default_not_readability_evidence",
+      "speechPolicy": "use_measured_voice_duration_and_review_subtitle_sync"
+    },
+    "density": {
+      "maxTitleChars": 18,
+      "maxBodyCharsPerLine": 20,
+      "maxVisibleBodyChars": 46,
+      "maxSimultaneousReadingZones": 1,
+      "overflowAction": [
+        "shorten_copy",
+        "split_scene",
+        "move_supporting_detail_to_companion_document"
+      ],
+      "budgetStatus": "starting_defaults_require_device_review"
+    },
+    "roleScale": {
+      "landscape": {
+        "title": 1,
+        "lead": 1,
+        "body": 1,
+        "label": 1,
+        "caption": 1
+      },
+      "portrait": {
+        "title": 0.92,
+        "lead": 1,
+        "body": 1.08,
+        "label": 1.08,
+        "caption": 1.08
+      }
+    },
+    "accessibility": {
+      "meaningMustNotDependOnColorOnly": true,
+      "contrastMeasuredOnFinalComposite": true,
+      "captionSafeAreaRequired": true,
+      "mobileReadingReviewRequired": true,
+      "audioOnlyMeaningNeedsVisibleEquivalent": true,
+      "verified": false
+    }
+  },
+  "id": "operation-notes",
+  "nameZh": "操作旁注",
+  "summary": "围绕真实操作画面或明确标注的重建画面，用稀疏的步骤号、指向线和结果条解释关键动作。",
+  "intent": {
+    "useCases": [
+      "产品教程",
+      "软件操作演示",
+      "代码修复过程",
+      "文件生成与保存"
+    ],
+    "goals": [
+      "保留操作证据的上下文",
+      "让观众定位动作与结果"
+    ],
+    "notFor": [
+      "用合成界面冒充真实执行",
+      "持续密集标注所有控件"
+    ]
+  },
+  "palette": {
+    "canvas": "#17222D",
+    "surface": "#243440",
+    "text": "#F4F7F8",
+    "mutedText": "#B7C8D2",
+    "accent": "#7AD1DE",
+    "positive": "#99CFAC",
+    "caution": "#EBC47E",
+    "critical": "#F0A29D",
+    "border": "#567184",
+    "background": "#17222D",
+    "primary": "#7AD1DE",
+    "muted": "#B7C8D2"
+  },
+  "scenePrimitives": [
+    {
+      "id": "action-callout",
+      "purpose": "解释一个关键操作",
+      "slots": [
+        {
+          "id": "captureKind",
+          "semanticRole": "real_capture_or_reconstruction",
+          "required": true,
+          "maxChars": 10,
+          "maxLines": 1
+        },
+        {
+          "id": "step",
+          "semanticRole": "ordinal",
+          "required": true,
+          "maxChars": 2,
+          "maxLines": 1
+        },
+        {
+          "id": "instruction",
+          "semanticRole": "instruction",
+          "required": true,
+          "maxChars": 26,
+          "maxLines": 2
+        },
+        {
+          "id": "operationId",
+          "semanticRole": "capture_log_record_id",
+          "required": true,
+          "maxChars": 28,
+          "maxLines": 2
+        }
+      ],
+      "motionPreset": "callout",
+      "textBudget": {
+        "maxVisibleBodyChars": 36,
+        "maxSimultaneousReadingZones": 1
+      }
+    },
+    {
+      "id": "result-receipt",
+      "purpose": "说明真实生成或保存的产物",
+      "slots": [
+        {
+          "id": "outcome",
+          "semanticRole": "observed_outcome",
+          "required": true,
+          "maxChars": 24,
+          "maxLines": 2
+        },
+        {
+          "id": "artifactId",
+          "semanticRole": "output_artifact_id",
+          "required": true,
+          "maxChars": 32,
+          "maxLines": 2
+        },
+        {
+          "id": "verification",
+          "semanticRole": "readback_status",
+          "required": true,
+          "maxChars": 14,
+          "maxLines": 1
+        }
+      ],
+      "motionPreset": "capture-focus",
+      "textBudget": {
+        "maxVisibleBodyChars": 48,
+        "maxSimultaneousReadingZones": 1
+      }
+    }
+  ],
+  "avoidances": [
+    "高亮遮住输入或输出",
+    "将重建步骤冒充原始录屏",
+    "将剪辑后时长写成程序运行时长",
+    "竖屏直接缩小整张桌面录屏",
+    "模拟鼠标轨迹却不给重建标记"
+  ],
+  "baseVersion": "0.1.0",
+  "compatibility": {
+    "workpackBaseRange": ">=0.1.0 <0.2.0",
+    "artSchemaRange": ">=1.0.0 <2.0.0",
+    "compatibilityStatus": "declared_not_runtime_verified",
+    "migrationPolicy": "reject_unknown_major_and_preserve_project_copy"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "1.0.0", "status": "NOT_RUN", "runId": "fill-run-id",
+  "scenario": "同内容、同字体、同输出尺寸/FPS/codec/质量目标",
+  "variant": {"engine": "", "capture": "", "encoder": "", "concurrency": 1},
+  "environment": {}, "inputHashes": [], "coldOrWarm": "cold", "repeatIndex": 1,
+  "timingsSeconds": {"startup": null, "ready": null, "render": null, "encode": null, "qa": null, "endToEnd": null},
+  "peakRssBytes": null, "frameCount": null, "outputBytes": null,
+  "failure": null, "qualityEvidence": [], "rawLogs": [], "iterationTask": "改一条中文文案后重新交付"
+}

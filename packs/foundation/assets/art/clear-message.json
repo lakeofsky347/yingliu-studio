@@ -1,0 +1,394 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "art-recipe",
+  "version": "1.0.0",
+  "status": "design_proposal",
+  "provenance": {
+    "origin": "original_design_for_this_workpack",
+    "externalArtAssets": [],
+    "implementationStatus": "not_implemented",
+    "performanceStatus": "not_measured"
+  },
+  "typography": {
+    "units": "pixels_at_short_edge_1080",
+    "fontFamilies": {
+      "primary": [
+        "PingFang SC",
+        "Microsoft YaHei",
+        "Noto Sans SC",
+        "sans-serif"
+      ],
+      "technical": [
+        "Noto Sans Mono CJK SC",
+        "Noto Sans SC",
+        "monospace"
+      ]
+    },
+    "roles": {
+      "title": {
+        "sizeAtShortEdge1080": 76,
+        "weight": 700,
+        "lineHeightRatio": 1.18
+      },
+      "lead": {
+        "sizeAtShortEdge1080": 48,
+        "weight": 600,
+        "lineHeightRatio": 1.35
+      },
+      "body": {
+        "sizeAtShortEdge1080": 38,
+        "weight": 400,
+        "lineHeightRatio": 1.48
+      },
+      "label": {
+        "sizeAtShortEdge1080": 30,
+        "weight": 600,
+        "lineHeightRatio": 1.35
+      },
+      "caption": {
+        "sizeAtShortEdge1080": 32,
+        "weight": 400,
+        "lineHeightRatio": 1.42
+      }
+    },
+    "cjk": {
+      "trackingEm": 0,
+      "lineBreakStrategy": "semantic_phrase_then_width_check",
+      "avoidLineStart": [
+        "，",
+        "。",
+        "、",
+        "；",
+        "：",
+        "！",
+        "？",
+        "）",
+        "】",
+        "》"
+      ],
+      "avoidLineEnd": [
+        "（",
+        "【",
+        "《"
+      ],
+      "keepUnitsWithNumbers": true,
+      "maxTitleLines": 2,
+      "useCondensedFontToFit": false,
+      "overflowPolicy": "rewrite_or_split_scene_before_shrinking"
+    },
+    "fontPolicy": {
+      "availability": "unverified_on_target_machine",
+      "bundledFontsNeedSourceRecord": true,
+      "fallbackChangesRequireLayoutReview": true,
+      "glyphCoverageCheckRequired": true,
+      "fontLicenseVerified": false
+    }
+  },
+  "layout": {
+    "units": "normalized-viewport",
+    "variants": {
+      "landscape": {
+        "referenceSize": {
+          "width": 1920,
+          "height": 1080
+        },
+        "safeInsets": {
+          "top": 0.055,
+          "right": 0.055,
+          "bottom": 0.055,
+          "left": 0.055
+        },
+        "regions": [
+          {
+            "id": "title",
+            "x": 0.065,
+            "y": 0.075,
+            "w": 0.8,
+            "h": 0.14
+          },
+          {
+            "id": "main",
+            "x": 0.065,
+            "y": 0.27,
+            "w": 0.53,
+            "h": 0.48
+          },
+          {
+            "id": "support",
+            "x": 0.65,
+            "y": 0.29,
+            "w": 0.28,
+            "h": 0.4
+          },
+          {
+            "id": "caption",
+            "x": 0.065,
+            "y": 0.86,
+            "w": 0.87,
+            "h": 0.085
+          }
+        ],
+        "readingOrder": [
+          "title",
+          "main",
+          "support",
+          "caption"
+        ],
+        "compositionRule": "left_statement_right_single_support"
+      },
+      "portrait": {
+        "referenceSize": {
+          "width": 1080,
+          "height": 1920
+        },
+        "safeInsets": {
+          "top": 0.055,
+          "right": 0.065,
+          "bottom": 0.055,
+          "left": 0.065
+        },
+        "regions": [
+          {
+            "id": "title",
+            "x": 0.075,
+            "y": 0.065,
+            "w": 0.85,
+            "h": 0.16
+          },
+          {
+            "id": "main",
+            "x": 0.075,
+            "y": 0.265,
+            "w": 0.85,
+            "h": 0.3
+          },
+          {
+            "id": "support",
+            "x": 0.075,
+            "y": 0.625,
+            "w": 0.85,
+            "h": 0.16
+          },
+          {
+            "id": "caption",
+            "x": 0.075,
+            "y": 0.85,
+            "w": 0.85,
+            "h": 0.09
+          }
+        ],
+        "readingOrder": [
+          "title",
+          "main",
+          "support",
+          "caption"
+        ],
+        "compositionRule": "statement_then_support_vertical_stack"
+      }
+    },
+    "origin": "top-left",
+    "overlapPolicy": "annotation_lines_may_overlap_object_region_but_must_not_obscure_labels_or_captions"
+  },
+  "motion": {
+    "timeUnit": "seconds",
+    "clockPolicy": "explicit_time_or_frame_index",
+    "seedPolicy": "stable_seed_for_procedural_variation",
+    "presets": [
+      {
+        "id": "settle",
+        "duration": 0.32,
+        "description": "主句由轻微纵向位移和不透明度变化入场，落定后保持。",
+        "allowedProperties": [
+          "position",
+          "opacity"
+        ]
+      },
+      {
+        "id": "emphasis",
+        "duration": 0.22,
+        "description": "一处关键词的底线显现，文字本身不抖动。",
+        "allowedProperties": [
+          "stroke_progress"
+        ]
+      }
+    ],
+    "reducedMotion": {
+      "strategy": "static_states_with_short_dissolve",
+      "maxTransitionSeconds": 0.16,
+      "disable": [
+        "parallax",
+        "camera_orbit",
+        "oscillation",
+        "stroke_scribble"
+      ]
+    },
+    "implementationStatus": "not_implemented"
+  },
+  "adaptation": {
+    "aspectRatio": {
+      "supportedProfiles": [
+        "landscape",
+        "portrait"
+      ],
+      "policy": "recompose_regions_and_sequence_before_scaling",
+      "otherRatios": "requires_project_override_and_visual_review"
+    },
+    "chineseReading": {
+      "countUnit": "visible_grapheme_clusters_for_chinese_dominant_copy",
+      "startingRateCharsPerSecond": 3.5,
+      "minReadingHoldSeconds": 2.5,
+      "holdStarts": "after_reveal_and_layout_settle",
+      "rateStatus": "conservative_design_default_not_readability_evidence",
+      "speechPolicy": "use_measured_voice_duration_and_review_subtitle_sync"
+    },
+    "density": {
+      "maxTitleChars": 20,
+      "maxBodyCharsPerLine": 22,
+      "maxVisibleBodyChars": 66,
+      "maxSimultaneousReadingZones": 2,
+      "overflowAction": [
+        "shorten_copy",
+        "split_scene",
+        "move_supporting_detail_to_companion_document"
+      ],
+      "budgetStatus": "starting_defaults_require_device_review"
+    },
+    "roleScale": {
+      "landscape": {
+        "title": 1,
+        "lead": 1,
+        "body": 1,
+        "label": 1,
+        "caption": 1
+      },
+      "portrait": {
+        "title": 0.92,
+        "lead": 1,
+        "body": 1.08,
+        "label": 1.08,
+        "caption": 1.08
+      }
+    },
+    "accessibility": {
+      "meaningMustNotDependOnColorOnly": true,
+      "contrastMeasuredOnFinalComposite": true,
+      "captionSafeAreaRequired": true,
+      "mobileReadingReviewRequired": true,
+      "audioOnlyMeaningNeedsVisibleEquivalent": true,
+      "verified": false
+    }
+  },
+  "id": "clear-message",
+  "nameZh": "信息聚焦",
+  "summary": "以一条主结论和一项支撑信息组织中文信息卡，让观众先读懂，再看到细节。",
+  "intent": {
+    "useCases": [
+      "研究结论摘要",
+      "课程要点",
+      "方法说明",
+      "阶段成果"
+    ],
+    "goals": [
+      "单屏一个可复述观点",
+      "形成稳定中文阅读节奏"
+    ],
+    "notFor": [
+      "多指标密集仪表盘",
+      "整页文档直接展示"
+    ]
+  },
+  "palette": {
+    "canvas": "#F6F3EC",
+    "surface": "#FFFFFF",
+    "text": "#202C38",
+    "mutedText": "#586875",
+    "accent": "#245E75",
+    "positive": "#326C4B",
+    "caution": "#8B5E1B",
+    "critical": "#9D3E3E",
+    "border": "#C8D2D8",
+    "background": "#F6F3EC",
+    "primary": "#245E75",
+    "muted": "#586875"
+  },
+  "scenePrimitives": [
+    {
+      "id": "claim-card",
+      "purpose": "陈述一条主结论",
+      "slots": [
+        {
+          "id": "title",
+          "semanticRole": "heading",
+          "required": true,
+          "maxChars": 20,
+          "maxLines": 2
+        },
+        {
+          "id": "claim",
+          "semanticRole": "primary_statement",
+          "required": true,
+          "maxChars": 42,
+          "maxLines": 3
+        },
+        {
+          "id": "support",
+          "semanticRole": "supporting_note",
+          "required": false,
+          "maxChars": 24,
+          "maxLines": 2
+        }
+      ],
+      "motionPreset": "settle",
+      "textBudget": {
+        "maxVisibleBodyChars": 66,
+        "maxSimultaneousReadingZones": 1
+      }
+    },
+    {
+      "id": "step-marker",
+      "purpose": "显示一项步骤及下一步关系",
+      "slots": [
+        {
+          "id": "stepNumber",
+          "semanticRole": "ordinal",
+          "required": true,
+          "maxChars": 2,
+          "maxLines": 1
+        },
+        {
+          "id": "action",
+          "semanticRole": "instruction",
+          "required": true,
+          "maxChars": 28,
+          "maxLines": 2
+        },
+        {
+          "id": "outcome",
+          "semanticRole": "expected_outcome",
+          "required": false,
+          "maxChars": 24,
+          "maxLines": 2
+        }
+      ],
+      "motionPreset": "emphasis",
+      "textBudget": {
+        "maxVisibleBodyChars": 52,
+        "maxSimultaneousReadingZones": 1
+      }
+    }
+  ],
+  "avoidances": [
+    "同一屏加入超过一个主结论",
+    "用缩小正文解决溢出",
+    "给所有字同时做逐字弹跳",
+    "以颜色代替结论状态文字",
+    "用装饰图表承载未经核实的数值"
+  ],
+  "baseVersion": "0.1.0",
+  "compatibility": {
+    "workpackBaseRange": ">=0.1.0 <0.2.0",
+    "artSchemaRange": ">=1.0.0 <2.0.0",
+    "compatibilityStatus": "declared_not_runtime_verified",
+    "migrationPolicy": "reject_unknown_major_and_preserve_project_copy"
+  }
+}

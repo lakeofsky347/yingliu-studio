@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1.0.0", "kind": "provider-adapter-design", "id": "my-provider", "version": "0.1.0", "compatibleBase": "0.1.0",
+  "status": "design-template-not-implemented",
+  "purpose": "填写TTS/ASR/素材生成等输入输出边界",
+  "inputs": [], "outputs": [], "modelVersion": null,
+  "requiresNetwork": false, "requiresPaidCalls": false,
+  "credentialHandling": "仅运行环境注入，不写入项目或归档",
+  "authorization": "按当次用户授权范围执行；本模板不授权外部调用",
+  "provenanceFields": ["provider", "modelVersion", "generatedAt", "inputHash", "outputHash", "usageCost"],
+  "failureBehavior": "保存可恢复状态与服务错误；不将不可用或限流记为成功",
+  "validationEvidence": []
+}
