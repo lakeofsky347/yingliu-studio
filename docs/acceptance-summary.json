@@ -96,6 +96,10 @@
     {
       "name": "UI source edit commits with CAS and real runtime check",
       "status": "PASS"
+    },
+    {
+      "name": "wide desktop graph is bounded and visible",
+      "status": "PASS"
     }
   ],
   "actualMedia": {
