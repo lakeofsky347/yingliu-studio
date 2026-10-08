@@ -49,13 +49,16 @@ export interface TaskState {
   startedAt:string; finishedAt?:string; error?:string; shotId?:string; logPath?:string;
 }
 export interface EnvironmentSettings { browserPath:string; ffmpegPath:string; ffprobePath:string }
-export interface EnvironmentInfo extends EnvironmentSettings { browserAvailable:boolean; ffmpegAvailable:boolean; ffprobeAvailable:boolean }
+export interface EnvironmentInfo extends EnvironmentSettings { browserAvailable:boolean; ffmpegAvailable:boolean; ffprobeAvailable:boolean; platform?:string; localSpeechAvailable?:boolean }
 export interface ProviderGroup { id:string; name:string; models:{id:string;name:string;inputModalities?:string[]}[]; error?:string }
+export interface SecretStoreStatus {
+  available:boolean; backend:string; hasStoredKey?:boolean; error?:string;
+}
 export interface StudioSnapshot {
   project:VideoProject|null; root:string|null; task:TaskState|null;
   previewUrl:string|null; previewRevision:number|null; assetBaseUrl?:string|null; providers:ProviderGroup[];
   environment:EnvironmentInfo; recent:{path:string;title:string;id:string}[];
-  sessionId?:string;focus?:{shotId?:string;frame?:number};audioUrl?:string|null;tts?:TtsSettings;ttsConfigured?:boolean;
+  sessionId?:string;focus?:{shotId?:string;frame?:number};audioUrl?:string|null;tts?:TtsSettings;ttsConfigured?:boolean;credentialStatus?:SecretStoreStatus;
 }
 export type RpcResult<T=unknown>={ok:true;value:T}|{ok:false;error:{code:string;message:string}};
 export interface ClientRpc { call(channel:string,endpoint:string,payload:unknown,signal?:AbortSignal):Promise<RpcResult> }

@@ -1,0 +1,37 @@
+name: Platform checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Enable and verify real Windows file symlinks
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock'
+          New-Item -Path $key -Force | Out-Null
+          New-ItemProperty -Path $key -Name AllowDevelopmentWithoutDevLicense -Value 1 -PropertyType DWord -Force | Out-Null
+          node --input-type=module -e "import {mkdtemp,writeFile,symlink,realpath,rm} from 'node:fs/promises'; import {tmpdir} from 'node:os'; import {join} from 'node:path'; const root=await mkdtemp(join(tmpdir(),'yingliu-symlink-')); try { const target=join(root,'target.txt'); const link=join(root,'link.txt'); await writeFile(target,'fixture'); await symlink(target,link,'file'); if(await realpath(link)!==await realpath(target)) throw new Error('File symlink did not resolve to fixture'); } finally { await rm(root,{recursive:true,force:true}); }"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run package:app
+      - run: node scripts/verify-package.mjs --layout-only

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { defaultSceneSource, defaultShot, normalizeSceneDurations } from '../core/index.ts';
 import type { SceneSource, Shot, VideoProject } from '../shared/types.ts';
 import type { ProviderConfig, ProviderHost, ProviderSettings, SecretStore } from './contracts.ts';
+import { inspectCredential, updateCredential } from './secrets.ts';
 
 export const DEMO_PROVIDER = 'demo';
 export const DEMO_MODEL = 'offline-director';
@@ -47,23 +48,23 @@ export class ProviderManager {
     try{const saved=object(JSON.parse(await readFile(join(this.dataDirectory,'provider.json'),'utf8')));this.config=configuration(object(saved.config));this.mode=saved.mode==='demo'&&this.options.allowFixtures?'demo':'custom';}
     catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
   })();}
-  private async currentSettings():Promise<ProviderSettings>{return {config:structuredClone(this.config),hasKey:!!(await this.secrets.get(KEY_REF)),mode:this.mode};}
+  private async currentSettings():Promise<ProviderSettings>{return {config:structuredClone(this.config),...await inspectCredential(this.secrets,KEY_REF),mode:this.mode};}
   async settings():Promise<ProviderSettings>{await this.initialize();await this.writes;return this.currentSettings();}
   async save(input:Partial<ProviderConfig>&{apiKey?:string;mode?:'demo'|'custom'}):Promise<ProviderSettings>{
     await this.initialize();const captured=structuredClone(input);const work=this.writes.then(async()=>{
       const {apiKey,mode,...fields}=captured;const next=configuration({...this.config,...fields});
       if(mode!==undefined&&!['demo','custom'].includes(mode))throw new Error('模型模式无效');
       if(mode==='demo'&&!this.options.allowFixtures)throw new Error('离线 fixture 仅供测试，正常应用使用已配置的模型服务');
-      const previousKey=apiKey===undefined?undefined:await this.secrets.get(KEY_REF);const nextMode=mode??this.mode;await mkdir(this.dataDirectory,{recursive:true});
+      const nextMode=mode??this.mode;await mkdir(this.dataDirectory,{recursive:true});
       const path=join(this.dataDirectory,'provider.json'),temporary=path+'.tmp-'+randomUUID();
-      try{if(apiKey!==undefined){if(apiKey.trim())await this.secrets.set(KEY_REF,apiKey.trim());else await this.secrets.delete(KEY_REF);}
-        await writeFile(temporary,JSON.stringify({version:2,config:next,mode:nextMode},null,2)+'\n');await rename(temporary,path);this.config=next;this.mode=nextMode;
-      }catch(error){if(apiKey!==undefined){if(previousKey)await this.secrets.set(KEY_REF,previousKey);else await this.secrets.delete(KEY_REF);}throw error;}
+      const commit=async()=>{await writeFile(temporary,JSON.stringify({version:2,config:next,mode:nextMode},null,2)+'\n');await rename(temporary,path);this.config=next;this.mode=nextMode;};
+      try{if(apiKey===undefined)await commit();else await updateCredential(this.secrets,KEY_REF,apiKey.trim()||undefined,commit);}
       finally{await rm(temporary,{force:true});}return this.currentSettings();
     });this.writes=work.then(()=>undefined,()=>undefined);return work;
   }
   async check():Promise<{ok:boolean;message:string}>{
     const settings=await this.settings();if(settings.mode==='demo')return {ok:true,message:'离线演示模型可用；这是确定性演示，未连接远程模型。'};
+    if(settings.credentialStatus&&!settings.credentialStatus.available)return {ok:false,message:settings.credentialStatus.error??'系统安全存储不可用，请解锁后重试。'};
     const key=await this.secrets.get(KEY_REF);if(!key)return {ok:false,message:'请先保存当前应用的模型 API Key。'};
     try{const response=await (this.options.fetch??fetch)(this.config.baseUrl+'/models',{headers:{Authorization:`Bearer ${key}`},signal:AbortSignal.timeout(15000)});
       if(!response.ok)return {ok:false,message:`模型目录检查失败（HTTP ${response.status}）；真实创作仍为 NOT_CHECKED。`};

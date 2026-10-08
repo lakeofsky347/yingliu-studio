@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto';
-import {readFile,writeFile,mkdir,readdir,rename} from 'node:fs/promises';
+import {readFile,writeFile,mkdir,readdir,rename,rm} from 'node:fs/promises';
 import {resolve,join,relative} from 'node:path';
 import {homedir} from 'node:os';
 import {createProject,compileSpec,defaultSceneSource,updateShot,updateTarget,validateProject,reorderShots} from '../core/index.ts';
@@ -9,6 +9,8 @@ import {ProjectStore,projectPath,validateStoredProject,validateSources} from './
 import {VideoRenderer,detectEnvironment} from './renderer.ts';
 import {AppSceneGenerator,parseSceneSource,normalizeStoryboard} from './generator.ts';
 import {SpeechSynthesizer} from './audio.ts';
+import {inspectCredential,isCredentialError,updateCredential} from '../app/secrets.ts';
+import {defaultTtsSettings,validateTtsSettings} from '../shared/tts-capability.ts';
 
 interface TaskRequest { endpoint:'preview'|'export'|'generate'; payload:Record<string,string> }
 interface RecordedTask extends TaskState { appRecordVersion?:1; revision?:number; request?:TaskRequest; retryOf?:string }
@@ -24,12 +26,12 @@ export class StudioService {
   private readonly restoreRecent:boolean;
   private readonly speech=new SpeechSynthesizer();
   private audioUrl:string|null=null;
-  private tts:TtsSettings={endpoint:'local:say',model:'',voice:'',speed:1,enabled:false};
+  private tts:TtsSettings;
   constructor(private ctx:HostContext,config:{baseDirectory?:string;restoreRecent?:boolean}={}){
     this.baseDirectory=resolve(config.baseDirectory??process.env.YINGLIU_PROJECTS??join(homedir(),'Documents','YingliuProjects'));
     this.restoreRecent=config.restoreRecent!==false;
     this.store=new ProjectStore({baseDirectory:this.baseDirectory});
-    const env=detectEnvironment();this.settings={browserPath:env.browserPath,ffmpegPath:env.ffmpegPath,ffprobePath:env.ffprobePath};
+    const env=detectEnvironment();this.settings={browserPath:env.browserPath,ffmpegPath:env.ffmpegPath,ffprobePath:env.ffprobePath};this.tts=defaultTtsSettings(env);
     this.initialized=this.initialize();
   }
   private async initialize(){
@@ -38,7 +40,7 @@ export class StudioService {
     const recent=this.restoreRecent?await this.store.recent():[];
     if(recent[0])try{this.project=await this.store.open(recent[0].path);this.root=recent[0].path;await this.recoverTask();await this.refreshPreview();}catch{/* Recent path may have been moved; keep the picker usable. */}
   }
-  async snapshot():Promise<StudioSnapshot>{await this.initialized;const credentials=this.ctx.credentials;return structuredClone({project:this.project,root:this.root,task:this.task,previewUrl:this.previewUrl,previewRevision:this.previewRevision,assetBaseUrl:this.assetBaseUrl,audioUrl:this.audioUrl,tts:{...this.tts,apiKey:undefined},ttsConfigured:!!(await credentials.get('YINGLIU_TTS_API_KEY')),providers:this.providers,environment:detectEnvironment(this.settings),recent:await this.store.recent()});}
+  async snapshot():Promise<StudioSnapshot>{await this.initialized;const credentials=await inspectCredential(this.ctx.credentials,'YINGLIU_TTS_API_KEY');return structuredClone({project:this.project,root:this.root,task:this.task,previewUrl:this.previewUrl,previewRevision:this.previewRevision,assetBaseUrl:this.assetBaseUrl,audioUrl:this.audioUrl,tts:{...this.tts,apiKey:undefined},ttsConfigured:credentials.hasKey,credentialStatus:credentials.credentialStatus,providers:this.providers,environment:detectEnvironment(this.settings),recent:await this.store.recent()});}
   private required(){if(!this.project||!this.root)throw new Error('请先新建或打开项目');return {project:this.project,root:this.root};}
   private assertIdle(){if(this.task?.status==='running')throw new Error('已有任务运行，请等待或取消');}
   private async refreshPreview(){
@@ -125,10 +127,11 @@ export class StudioService {
   private async speechSettings():Promise<TtsSettings>{
     try{this.tts={...this.tts,...JSON.parse(await readFile(join(this.baseDirectory,'tts.json'),'utf8'))};delete this.tts.apiKey;}
     catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
+    if(this.tts.endpoint==='local:say')return {...this.tts};
     return {...this.tts,apiKey:await this.ctx.credentials.get('YINGLIU_TTS_API_KEY')};
   }
   private async redact(text:string):Promise<string>{
-    for(const reference of ['YINGLIU_TTS_API_KEY','yingliu.custom-model.api-key']){const key=await this.ctx.credentials.get(reference);if(key)text=text.split(key).join('[redacted]');}
+    for(const reference of ['YINGLIU_TTS_API_KEY','yingliu.custom-model.api-key']){try{const key=await this.ctx.credentials.get(reference);if(key)text=text.split(key).join('[redacted]');}catch(error){if(!isCredentialError(error))throw error;}}
     return text.replace(/Bearer\s+[^\s"',;]+/gi,'Bearer [redacted]').replace(/\bsk-[a-zA-Z0-9_-]{8,}/g,'[redacted]');
   }
   private async writeTaskJournal(root:string,task:RecordedTask):Promise<void>{
@@ -241,7 +244,15 @@ export class StudioService {
         case 'save':{if(this.task?.status==='running'&&this.task.kind!=='export')this.assertIdle();const {project}=this.required();if(!data.project||data.project.id!==project.id)throw new Error('项目已切换，请刷新后重试');const next=structuredClone(data.project) as VideoProject;this.fitAudio(next);await this.persist({...next,outputs:project.outputs}, {},'保存工程');break;}
         case 'apply':await this.apply(data);break;
         case 'import':{this.assertIdle();const {root,project}=this.required();const asset=await this.store.importAsset(root,data,this.settings);const next=structuredClone(project);next.assets.push(asset);next.graph.positions[asset.id]=[60,80+(next.assets.length-1)*180];await this.persist(next,{},'导入素材');break;}
-        case 'tts':{this.assertIdle();const options:Partial<TtsSettings>={};for(const key of ['endpoint','model','voice','speed','enabled'] as const)if(data[key]!==undefined)(options as any)[key]=data[key];if(data.apiKey!==undefined){const credentials=this.ctx.credentials;if(data.apiKey){if(!credentials)throw new Error('宿主凭据服务不可用，请使用本地配音或无密钥端点');await credentials.set('YINGLIU_TTS_API_KEY',String(data.apiKey));}else await credentials.delete('YINGLIU_TTS_API_KEY');}this.tts={...this.tts,...options};await mkdir(this.baseDirectory,{recursive:true});await writeFile(join(this.baseDirectory,'tts.json'),JSON.stringify(this.tts,null,2));break;}
+        case 'tts':{
+          this.assertIdle();const options:Partial<TtsSettings>={};for(const key of ['endpoint','model','voice','speed','enabled'] as const)if(data[key]!==undefined)(options as any)[key]=data[key];
+          const next={...this.tts,...options},file=join(this.baseDirectory,'tts.json'),temporary=file+'.tmp-'+randomUUID();
+          const onlyClearingKey=data.apiKey!==undefined&&!String(data.apiKey).trim()&&!Object.keys(options).length;
+          if(!onlyClearingKey)validateTtsSettings(next,detectEnvironment(this.settings));
+          const commit=async()=>{await mkdir(this.baseDirectory,{recursive:true});await writeFile(temporary,JSON.stringify(next,null,2));await rename(temporary,file);this.tts=next;};
+          try{if(data.apiKey===undefined)await commit();else await updateCredential(this.ctx.credentials,'YINGLIU_TTS_API_KEY',String(data.apiKey).trim()||undefined,commit);}
+          finally{await rm(temporary,{force:true});}break;
+        }
         case 'audio':{
           this.assertIdle();const {root,project}=this.required(),operation=data.operation??data.action;
           if(operation==='synthesize'||operation==='tts'){

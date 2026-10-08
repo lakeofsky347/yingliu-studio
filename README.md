@@ -6,12 +6,24 @@
 
 ## 打开应用
 
-macOS 本机应用：`artifacts/映流 Studio.app`。源码运行需要 Node.js ≥ 22.18：
+源码运行需要 Node.js ≥ 22.18：
 
 ```sh
 npm ci
 npm start
 ```
+
+`npm run package:app` 使用当前系统安装的 Electron，输出本机架构的独立应用：
+
+| 系统 | 输出与启动入口 |
+| --- | --- |
+| macOS | `artifacts/映流 Studio.app`，保留本机 ad-hoc 临时签名流程 |
+| Windows | `artifacts/yingliu-studio-win32-<arch>/yingliu-studio.exe` |
+| Linux | `artifacts/yingliu-studio-linux-<arch>/yingliu-studio.sh` |
+
+Windows/Linux 请移动或分发完整目录。应用包不包含工作区用户数据、模型密钥或开发依赖，不需要源码目录或系统 Node.js。Linux 需要桌面环境及 Electron 所需系统动态库；以普通用户启动，保留 Chromium sandbox。运行包内 `install-desktop-entry.sh` 可安装当前用户的应用菜单入口，移动目录后请重新运行该脚本。打包不会自行安装菜单入口。
+
+如需显式校验目标，例如 Linux x64：`npm run package:app -- --platform=linux --arch=x64`。目标必须与当前宿主及实际 Electron runtime 一致；Windows、macOS、Linux 和 x64/arm64 包分别在对应系统与架构上构建。
 
 应用包包含 Electron、界面、工程服务、ZIP 备份模块及浏览器驱动。逐帧捕获需要本机 Chrome/Chromium，编码需要 FFmpeg、ffprobe。首页显示检测结果；工程工作台的「运行环境」可选择或填写可执行文件绝对路径。缺少渲染工具时仍可编排分镜、导入素材和编辑源码。
 
@@ -52,10 +64,13 @@ npm run build
 npm run verify
 npm run package:app
 node scripts/verify-package.mjs
+node scripts/verify-package.mjs --layout-only
 ```
 
 `verify` 使用隔离数据目录和实际 localhost 模型测试网关，操作真实 Electron 界面、检查工程流转，实际捕帧、编码、完整解码并播放六秒带合成验收音的 MP4。它不请求付费供应商，不代表真实 DeepSeek 创作质量或 TTS 质量。结果在 `artifacts/acceptance-v02/`；源码、测试和脱敏验收摘要提交远端，凭据、项目、日志和大型媒体不提交。
 
-当前包为 macOS arm64、本机临时签名，尚未公证；Chrome/FFmpeg 仍由用户运行环境提供。跨机器安装、Windows/Linux 发行与真实模型创作验收分别待验证。没有云渲染、视频输入、多人协作或通用节点市场。
+`verify-package` 将本机包复制到源码目录之外，检查平台入口、相对软链接、许可证和完整依赖，再用包内 Electron 的 Node 模式启动独立服务，验证界面文件、工程创建及 ZIP 备份恢复。有图形环境时继续验证真实桌面界面与渲染；`--layout-only` 或 Linux 缺少显示服务时明确记为 `SKIP`，报告为 `PARTIAL`，不会视作桌面验收。结果保存在 `artifacts/acceptance-v02/package-verification-<platform>-<arch>.json`；临时目录和测试数据验证后清理。
 
-[架构与恢复协议](docs/ARCHITECTURE.md) · [模型导演协议](docs/MODEL-PROTOCOL.md) · [验收证据](docs/ACCEPTANCE.md) · [提取来源](docs/ORIGIN.md) · [第三方许可](THIRD_PARTY_NOTICES.md)
+已有 macOS arm64 本机原生验收，签名仍为临时签名、尚未公证。本轮增加 Windows/Linux 可携带目录打包，尚未签名或制作安装器；Linux 包已完成布局和包外服务验证，三个系统的新改动仍需原生及跨机器验收。三系统 CI 已配置，尚未远端运行。Chrome/FFmpeg 由用户提供。Linux 无安全钥匙环时不保存新密钥，仍可手动制作和清除旧密钥。没有云渲染、视频输入、多人协作或通用节点市场。
+
+[架构与恢复协议](docs/ARCHITECTURE.md) · [模型导演协议](docs/MODEL-PROTOCOL.md) · [验收证据](docs/ACCEPTANCE.md) · [平台适配进度](docs/PLATFORM-SUPPORT.md) · [提取来源](docs/ORIGIN.md) · [第三方许可](THIRD_PARTY_NOTICES.md)

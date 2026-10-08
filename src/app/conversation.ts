@@ -139,7 +139,7 @@ export class ConversationService {
     const running=this.run(input,controller);this.running=running;try{return await running;}finally{this.controller=undefined;this.activeTurnId=undefined;this.activeProjectId=undefined;this.ownedTaskId=undefined;this.running=undefined;}
   }
   private async run(original:ChatInput,controller:AbortController):Promise<{conversation:Conversation;snapshot:StudioSnapshot}>{
-    const settings=await this.providers.settings();const fixture=original.provider===DEMO_PROVIDER&&this.providers.fixtureEnabled();if(!fixture){if(original.provider!=='custom')throw new Error('请选择当前应用配置的模型');if(original.model!==settings.config.model)throw new Error('模型配置已变化，请重新选择');if(!settings.hasKey)throw new Error('请先在模型设置中配置当前应用的API Key；本轮没有创建或修改工程');}
+    const settings=await this.providers.settings();const fixture=original.provider===DEMO_PROVIDER&&this.providers.fixtureEnabled();if(!fixture){if(original.provider!=='custom')throw new Error('请选择当前应用配置的模型');if(original.model!==settings.config.model)throw new Error('模型配置已变化，请重新选择');if(!settings.hasKey)throw new Error(settings.credentialStatus?.error??'请先在模型设置中配置当前应用的API Key；本轮没有创建或修改工程');}
     let conversation=await this.history(original.projectId),input={...original};const retry=input.retryTurnId?conversation.turns?.find(t=>t.id===input.retryTurnId):undefined;
     if(input.retryTurnId&&!retry)throw new Error('重试回合不存在');if(retry&&retry.status==='pending')throw new Error('该回合仍在运行');if(retry)input={...retry.request,...input,message:input.message.trim()||retry.request.message,projectId:input.projectId??retry.request.projectId};
     if(!input.message.trim()||input.message.length>20000)throw new Error('制作请求须为1–20,000字符');

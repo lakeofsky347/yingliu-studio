@@ -29,7 +29,6 @@ export class ProjectHub {
   private focus?:StudioFocus;
   private providers:ProviderGroup[]=[];
   private tts?:TtsSettings;
-  private ttsConfigured?:boolean;
   constructor(private ctx:HostContext,config:{baseDirectory?:string}={}){
     this.baseDirectory=resolve(config.baseDirectory??process.env.YINGLIU_PROJECTS??join(homedir(),'Documents','YingliuProjects'));
     this.bootstrap=this.makeService();
@@ -42,7 +41,7 @@ export class ProjectHub {
       if(saved.version===1&&Array.isArray(saved.projects)&&saved.sessions&&typeof saved.sessions==='object')this.index=saved;
     }catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
     const current=await this.bootstrap.snapshot();
-    this.providers=current.providers;this.tts=current.tts;this.ttsConfigured=current.ttsConfigured;
+    this.providers=current.providers;this.tts=current.tts;
     for(const recent of current.recent)if(!this.index.projects.some(item=>item.id===recent.id))this.index.projects.push({id:recent.id,path:recent.path,title:recent.title});
     const selected=this.index.projects.find(item=>item.id===this.index.selected&&!item.archived)??this.index.projects.find(item=>!item.archived);
     this.index.selected=selected?.id;
@@ -98,7 +97,7 @@ export class ProjectHub {
   private async decorate(service:StudioService,sessionId?:string):Promise<HubSnapshot>{
     const snapshot=await service.snapshot();
     const selected=snapshot.project?.id===this.index.selected;
-    return {...snapshot,providers:this.providers,tts:this.tts??snapshot.tts,ttsConfigured:this.ttsConfigured??snapshot.ttsConfigured,sessionId:sessionId??(selected?this.selectedSession:undefined)??(snapshot.project?this.projectSessions(snapshot.project)[0]:undefined),focus:selected?this.focus:undefined,projects:structuredClone(this.index.projects.filter(item=>!item.archived)),recent:snapshot.recent.filter(item=>!this.index.projects.find(entry=>entry.id===item.id)?.archived)};
+    return {...snapshot,providers:this.providers,tts:this.tts??snapshot.tts,sessionId:sessionId??(selected?this.selectedSession:undefined)??(snapshot.project?this.projectSessions(snapshot.project)[0]:undefined),focus:selected?this.focus:undefined,projects:structuredClone(this.index.projects.filter(item=>!item.archived)),recent:snapshot.recent.filter(item=>!this.index.projects.find(entry=>entry.id===item.id)?.archived)};
   }
   /** Resolve by explicit project or session; never silently reuse another session's project. */
   async resolveProject(input:Input,sessionId?:string):Promise<{service:StudioService;projectId:string;snapshot:StudioSnapshot}>{
@@ -166,7 +165,7 @@ export class ProjectHub {
       const result=await service.rpc(endpoint,data);if(!result.ok)return result;
       if(['source','inspect','history','tasks','jobs'].includes(endpoint))return result;
       if(endpoint==='catalog')this.providers=(result.value as StudioSnapshot).providers;
-      if(endpoint==='tts'){const snapshot=result.value as StudioSnapshot;this.tts=snapshot.tts;this.ttsConfigured=snapshot.ttsConfigured;}
+      if(endpoint==='tts'){const snapshot=result.value as StudioSnapshot;this.tts=snapshot.tts;}
       await this.remember(await service.snapshot());return {ok:true,value:await this.decorate(service,sessionId)};
     }catch(error){return {ok:false,error:{code:error instanceof Error&&'code' in error?String(error.code):'STUDIO_ERROR',message:error instanceof Error?error.message:String(error)}};}
   }

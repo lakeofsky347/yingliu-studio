@@ -3,12 +3,15 @@ import {createServer} from 'node:http';
 import {mkdir,readFile,writeFile,copyFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
+import {release} from 'node:os';
 import assert from 'node:assert/strict';
 import {mockCompletionBody} from '../tests/model-gateway.ts';
 import {defaultSceneSource} from '../src/core/index.ts';
 import type {StudioSnapshot,VideoProject} from '../src/shared/types.ts';
 const root=resolve('.'),out=join(root,'artifacts/acceptance-v02'),data=join(root,'.local/acceptance-v02-'+Date.now());await mkdir(out,{recursive:true});
 const checks:{name:string;status:string;[key:string]:unknown}[]=[];const record=(name:string,details:Record<string,unknown>={})=>{checks.push({name,status:'PASS',...details});console.log('PASS '+name);};
+const platformName=({darwin:'macOS',win32:'Windows',linux:'Linux'} as Record<string,string>)[process.platform]??process.platform;
+let nativeAcceptance:'PASS'|'FAIL'|'NOT_CHECKED'='NOT_CHECKED',nativeRuntime:Record<string,unknown>|undefined;
 let failNext=false,requests=0;
 const gateway=createServer(async(req,res)=>{if(req.url==='/v1/models'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({data:[{id:'local-acceptance'}]}));return;}
   const chunks:Buffer[]=[];for await(const chunk of req)chunks.push(Buffer.from(chunk));requests++;
@@ -16,7 +19,7 @@ const gateway=createServer(async(req,res)=>{if(req.url==='/v1/models'){res.setHe
   try{const body=JSON.parse(Buffer.concat(chunks).toString('utf8'));res.setHeader('Content-Type','application/json');res.end(JSON.stringify(mockCompletionBody(body)));}catch(error){res.writeHead(500);res.end(String(error));}
 });await new Promise<void>(accept=>gateway.listen(0,'127.0.0.1',accept));const port=(gateway.address() as {port:number}).port;
 const env:Record<string,string>={...Object.fromEntries(Object.entries(process.env).filter(([,value])=>typeof value==='string')),YINGLIU_DATA_DIR:data};delete env.ELECTRON_RUN_AS_NODE;let native:ElectronApplication|undefined;let page!:Page;
-async function launch(){native=await electron.launch({args:[process.env.YINGLIU_VERIFY_APP||root],env,timeout:45000});page=await native.firstWindow();await page.getByRole('heading',{name:'我的影片',exact:false}).waitFor();}
+async function launch(){native=await electron.launch({args:[process.env.YINGLIU_VERIFY_APP||root],env,timeout:45000});nativeRuntime=await native.evaluate(({safeStorage})=>({platform:process.platform,architecture:process.arch,electron:process.versions.electron,credentialBackend:process.platform==='linux'?safeStorage.getSelectedStorageBackend():process.platform==='darwin'?'macos_keychain':'windows_dpapi',encryptionAvailable:safeStorage.isEncryptionAvailable()}));page=await native.firstWindow();await page.getByRole('heading',{name:'我的影片',exact:false}).waitFor();}
 async function call<T=StudioSnapshot>(endpoint:string='current',payload:unknown={}):Promise<T>{const result=await page.evaluate(async({endpoint,payload})=>window.yingliu!.call(endpoint,payload),{endpoint,payload});if(!result.ok)throw new Error(result.error.message);return result.value as T;}
 async function settled(snapshot:StudioSnapshot){const start=Date.now();while(snapshot.task?.status==='running'){if(Date.now()-start>240000)throw new Error('render timeout');await new Promise(accept=>setTimeout(accept,350));snapshot=await call('current',{projectId:snapshot.project!.id});}assert.equal(snapshot.task?.status,'complete',snapshot.task?.message);return snapshot;}
 async function until(check:()=>Promise<boolean>,timeout=15000){const start=Date.now();while(!await check()){if(Date.now()-start>timeout)throw new Error('condition timeout');await new Promise(accept=>setTimeout(accept,200));}}
@@ -56,5 +59,6 @@ try{
   const good=defaultSceneSource(),bad={...good,js:'export function render(){ while(true){} }'};const watchdogProject=await call('create',{title:'画面失响应恢复'});await call('apply',{projectId:watchdogProject.project!.id,expectedRevision:0,sources:[{shotId:watchdogProject.project!.shots[0]!.id,source:bad}]});await home();await page.getByRole('button',{name:'画面失响应恢复',exact:true}).click();await page.getByText('画面执行未响应，请检查镜头源码或刷新画面。',{exact:true}).waitFor({timeout:20000});assert.ok((await call('current',{projectId:manualId})).project);record('infinite-loop scene times out while editor and native API remain responsive');
   const stalled=await call('current',{projectId:watchdogProject.project!.id});await call('apply',{projectId:stalled.project!.id,expectedRevision:stalled.project!.revision,sources:[{shotId:stalled.project!.shots[0]!.id,source:good}]});await page.getByRole('button',{name:'重新加载画面',exact:true}).click();await page.waitForTimeout(1000);await page.getByRole('button',{name:'刷新预览',exact:true}).click();await until(async()=> (await call('current',{projectId:stalled.project!.id})).task?.status==='complete',60000);record('owned scene renderer reset and good-source preview recovery');
   await call('providers.save',{apiKey:''});record('synthetic key removed after acceptance');
-  await writeFile(join(out,'verification.json'),JSON.stringify({application:'映流 Studio',version:'0.2.0',checkedAt:new Date().toISOString(),checks,modelProtocol:'actual localhost HTTP gateway with deterministic test responder',realProvider:'NOT_CHECKED',humanFullViewing:'NOT_CHECKED',platform:'macOS '+process.arch,dataDirectory:data,requests},null,2)+'\n');console.log(JSON.stringify({passed:checks.length,report:join(out,'verification.json')}));
-}finally{await native?.close();await new Promise<void>((accept,reject)=>gateway.close(error=>error?reject(error):accept()));}
+  nativeAcceptance='PASS';console.log(JSON.stringify({passed:checks.length,report:join(out,'verification.json')}));
+}catch(error){nativeAcceptance='FAIL';checks.push({name:'native acceptance execution',status:'FAIL',message:error instanceof Error?error.message:String(error)});throw error;}
+finally{await native?.close();await new Promise<void>((accept,reject)=>gateway.close(error=>error?reject(error):accept()));await writeFile(join(out,'verification.json'),JSON.stringify({application:'映流 Studio',version:'0.2.0',checkedAt:new Date().toISOString(),nativeAcceptance,checks,modelProtocol:'actual localhost HTTP gateway with deterministic test responder',realProvider:'NOT_CHECKED',humanFullViewing:'NOT_CHECKED',platform:platformName+' '+process.arch,platformId:process.platform,architecture:process.arch,osRelease:release(),nativeRuntime,dataDirectory:data,requests},null,2)+'\n');}

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm,readFile,symlink,writeFile} from 'node:fs/promises';
+import {mkdtemp,rm,readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {zipSync,unzipSync} from 'fflate';
@@ -9,6 +9,7 @@ import {MemorySecrets,createApplication} from '../src/app/application.ts';
 import {exportProjectArchive,importProjectArchive} from '../src/app/archive.ts';
 import {createProject,defaultSceneSource} from '../src/core/index.ts';
 import type {StudioSnapshot} from '../src/shared/types.ts';
+import {createFileSymlinkOrSkip} from './fixtures/symlink.ts';
 
 async function fixture(){
   const directory=await mkdtemp(join(tmpdir(),'yingliu-archive-'));
@@ -44,13 +45,17 @@ test('corrupt hashes, traversal paths, missing sources and unknown ZIP files nev
     assert.equal((await f.backend.call<{projects:unknown[]}>('list')).projects.length,1);
   }finally{await f.close();}
 });
-test('ZIP expansion and project-local symlinks are bounded before importing or exporting',async()=>{
+test('ZIP expansion is bounded before importing',async()=>{
   const f=await fixture();try{
     const bomb=zipSync({'project.json':new Uint8Array(24*1024*1024+1)});assert.ok(bomb.length<100000);
     await assert.rejects(importProjectArchive(f.backend,{dataBase64:Buffer.from(bomb).toString('base64')}),/24 MiB|安全大小/);
+  }finally{await f.close();}
+});
+test('project-local file symlinks are refused before exporting',async context=>{
+  const f=await fixture();try{
     const snapshot=await f.backend.call<StudioSnapshot>('create',{title:'符号链接边界'});const outside=join(f.directory,'outside.bin');await writeFile(outside,'must stay outside');
     const imported=await f.backend.call<StudioSnapshot>('import',{projectId:snapshot.project!.id,name:'fixture.png',mime:'image/png',dataBase64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='});const asset=imported.project!.assets[0]!;
-    await rm(join(snapshot.root!,asset.path!));await symlink(outside,join(snapshot.root!,asset.path!));
+    await rm(join(snapshot.root!,asset.path!));if(!await createFileSymlinkOrSkip(context,outside,join(snapshot.root!,asset.path!)))return;
     await assert.rejects(exportProjectArchive(f.backend,{projectId:snapshot.project!.id}),/符号|symlink|越界|本项目|路径/i);
   }finally{await f.close();}
 });

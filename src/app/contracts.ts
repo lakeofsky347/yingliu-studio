@@ -1,4 +1,4 @@
-import type { ProviderGroup, RpcResult, StudioSnapshot } from '../shared/types.ts';
+import type { ProviderGroup, RpcResult, StudioSnapshot, SecretStoreStatus } from '../shared/types.ts';
 
 export interface BackendPort {
   call<T=StudioSnapshot>(endpoint:string, payload?:unknown):Promise<T>;
@@ -8,6 +8,9 @@ export interface SecretStore {
   get(ref:string):Promise<string|undefined>;
   set(ref:string, value:string):Promise<void>;
   delete(ref:string):Promise<void>;
+  status?(ref?:string):Promise<SecretStoreStatus>;
+  /** Preserve encrypted bytes on configuration failure, including when a key cannot be decrypted. */
+  withUpdate?(ref:string,value:string|undefined,commit:()=>Promise<void>):Promise<void>;
 }
 export interface ProviderConfig {
   id:string; name:string; baseUrl:string; model:string; supportsVision:boolean;
@@ -16,7 +19,7 @@ export interface ProviderConfig {
   maxVisionImages?:number; maxVisionBytes?:number; maxVisionDimension?:number;
 }
 export interface ProviderSettings {
-  config:ProviderConfig; hasKey:boolean; mode:'demo'|'custom';
+  config:ProviderConfig; hasKey:boolean; mode:'demo'|'custom'; credentialStatus?:SecretStoreStatus;
 }
 export interface ChatMessage {
   id:string; role:'user'|'assistant'; content:string; createdAt:string;

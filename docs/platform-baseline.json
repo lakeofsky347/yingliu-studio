@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-07T14:42:22.279419+00:00",
+  "recordedAtAsiaShanghai": "2026-10-07T22:42:22.279419+08:00",
+  "project": "yingliu-studio",
+  "version": "0.2.0",
+  "testedHead": "a7d7a8dab7ce2f6f2fb1a8a35ac89f16aaf93fc0",
+  "host": {
+    "platform": "linux",
+    "arch": "x64",
+    "distribution": "Debian GNU/Linux 13.6",
+    "node": "24.19.0",
+    "npm": "11.9.0",
+    "chromium": "151.0.7922.173",
+    "ffmpeg": "7.1.5",
+    "ffprobe": "7.1.5",
+    "displaySession": false
+  },
+  "runtime": {
+    "electron": "44.5.1",
+    "playwrightCore": "1.63.0"
+  },
+  "checks": [
+    {
+      "command": "npm run typecheck",
+      "status": "PASS",
+      "exitCode": 0
+    },
+    {
+      "command": "npm test",
+      "status": "PASS",
+      "exitCode": 0,
+      "counts": {
+        "tests": 60,
+        "pass": 60,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      "requiresLocalSocketPermission": true,
+      "skipReason": null
+    },
+    {
+      "command": "npm run build",
+      "status": "PASS",
+      "exitCode": 0
+    },
+    {
+      "name": "service-readiness",
+      "status": "PASS",
+      "checkedAt": "2026-10-07T14:37:55.634Z",
+      "result": {
+        "homepage": true,
+        "health": true,
+        "renderTools": true,
+        "tokenlessApiStatus": 403
+      }
+    },
+    {
+      "name": "isolated-browser-media-and-backup-smoke",
+      "status": "PASS",
+      "checkedAt": "2026-10-07T14:40:19.106Z",
+      "browserManualCreation": true,
+      "tokenlessApiDenied": true,
+      "frameCapture": true,
+      "export": {
+        "frames": 12,
+        "width": 320,
+        "height": 180,
+        "duration": 1,
+        "codec": "h264",
+        "fullDecode": true
+      },
+      "backupRestore": true,
+      "modelConfigured": false,
+      "audioTrack": "none; synthetic audio/native playback remain separate evidence"
+    }
+  ],
+  "executionConditions": {
+    "testSocketPermission": "command-scoped with_additional_permissions.network.enabled=true",
+    "dependencies": "preinstalled; no dependency or lockfile changes",
+    "sourcesAndTestsChanged": false,
+    "attempts": [
+      {
+        "mode": "default restricted sandbox",
+        "command": "npm test",
+        "reportedUnit": "test files; per-case output not available",
+        "exitCode": 0,
+        "status": "NOT_USED_AS_CASE_BASELINE",
+        "detail": "Restricted runner reported seven passing test files without per-case output (exit 0); not used as the case baseline. Rerunning standard npm test with required socket permission reported all 60 cases passed. Service startup separately required local socket permission."
+      }
+    ]
+  },
+  "scope": {
+    "windows": "NOT_CHECKED",
+    "macOS": "NOT_RECHECKED; historical platform evidence kept separately",
+    "nativeDesktop": "NOT_CHECKED; no display session",
+    "releaseInstallation": "NOT_CHECKED",
+    "realPaidProviders": "NOT_CHECKED; no paid requests",
+    "humanFullViewingAndListening": "NOT_CHECKED"
+  }
+}

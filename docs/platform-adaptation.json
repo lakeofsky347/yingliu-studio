@@ -1,0 +1,425 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUtc": "2026-10-07T16:16:46.388960+00:00",
+  "recordedAtAsiaShanghai": "2026-10-08T00:16:46.388960+08:00",
+  "project": "yingliu-studio",
+  "version": "0.2.0",
+  "baseHead": "a7d7a8dab7ce2f6f2fb1a8a35ac89f16aaf93fc0",
+  "result": "BASE_IMPLEMENTATION_VERIFIED_ON_LINUX; NATIVE_PLATFORM_ACCEPTANCE_PENDING",
+  "environment": {
+    "os": "Debian GNU/Linux 13.6",
+    "platform": "linux",
+    "arch": "x64",
+    "node": "24.19.0",
+    "npm": "11.9.0",
+    "chromium": "151.0.7922.173",
+    "ffmpeg": "7.1.5",
+    "ffprobe": "7.1.5",
+    "displaySession": false,
+    "electron": "44.5.1"
+  },
+  "verificationPermission": "Command-scoped local socket/IPC network permission; no global network policy change",
+  "checks": {
+    "typecheck": {
+      "status": "PASS",
+      "exitCode": 0,
+      "command": "npm run typecheck",
+      "evidence": "platform-adaptation-yingliu-studio-typecheck.log"
+    },
+    "test": {
+      "status": "PASS",
+      "exitCode": 0,
+      "command": "npm test",
+      "evidence": "platform-adaptation-yingliu-studio-test.log",
+      "tests": 121,
+      "passed": 121,
+      "failed": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "todo": 0
+    },
+    "build": {
+      "status": "PASS",
+      "exitCode": 0,
+      "command": "npm run build",
+      "evidence": "platform-adaptation-yingliu-studio-build.log"
+    },
+    "portablePackage": {
+      "status": "PARTIAL",
+      "command": "npm run package:app && node scripts/verify-package.mjs --layout-only",
+      "platform": "linux",
+      "arch": "x64",
+      "checkedAt": "2026-10-07T16:08:59.451Z",
+      "checks": [
+        {
+          "name": "bundle relocates with relative internal symlinks",
+          "status": "PASS"
+        },
+        {
+          "name": "platform launcher, app files, runtime dependencies and third-party licenses; workspace data excluded",
+          "status": "PASS"
+        },
+        {
+          "name": "relocated Electron executes with actual host platform and architecture",
+          "status": "PASS"
+        },
+        {
+          "name": "ZIP codec and browser driver resolve exclusively from relocated app",
+          "status": "PASS"
+        },
+        {
+          "name": "optional Linux desktop entry installs into isolated user menu",
+          "status": "PASS"
+        },
+        {
+          "name": "relocated application serves UI, creates project and backs up/restores using bundled modules",
+          "status": "PASS"
+        },
+        {
+          "name": "desktop GUI and media rendering acceptance",
+          "status": "SKIP",
+          "reason": "--layout-only requested"
+        }
+      ],
+      "guiVerified": false,
+      "temporaryDirectoryRemoved": true,
+      "distribution": "portable 目录；未签名；未制作安装器",
+      "evidence": "artifacts/acceptance-v02/package-verification-linux-x64.json"
+    }
+  },
+  "implemented": [
+    "Windows-compatible optional directory fsync while preserving file write/rename/I/O failures",
+    "Portable project names and case/Unicode/ancestor collision checks; historical snapshots retained",
+    "Host-specific browser/FFmpeg discovery, executable validation and explicit-path error preservation",
+    "Actual local speech capability gating; unsupported hosts use imported audio or an explicitly configured speech endpoint",
+    "Cross-platform injected tests plus three-OS CI definitions; remote CI not executed",
+    "Linux safeStorage rejects basic_text, unknown and unavailable backends; preserves encrypted bytes and allows targeted deletion",
+    "Serialized credential/config transactions with exact encrypted-byte rollback; unavailable credential status displayed without blocking manual editing",
+    "Host-only Windows/Linux portable directory and macOS .app packaging, relative symlinks and license allowlist"
+  ],
+  "acceptanceLimits": {
+    "windowsNative": "NOT_CHECKED",
+    "macosNativeRegression": "NOT_CHECKED",
+    "linuxDesktopGui": "NOT_CHECKED",
+    "remoteCi": "NOT_RUN",
+    "paidModelOrSpeechProvider": "NOT_CALLED",
+    "fullHumanPlayback": "NOT_CHECKED",
+    "nativeCredentialBackends": "NOT_CHECKED; capability/error branches tested via injected safeStorage"
+  },
+  "sourceSnapshot": {
+    "scope": "src, scripts, tests, .github, package.json, package-lock.json, tsconfig.json; excludes documentation, builds, user data and secrets",
+    "capturedAt": "2026-10-07T16:16:46.388960+00:00",
+    "sha256": "c94655aba4192749442063cd21448891d47b1fc3ee8b5271f9fb1742da144c6a",
+    "files": [
+      {
+        "path": ".github/workflows/platform-checks.yml",
+        "sha256": "b16ba9a582e42ffe1586dbdbe1c92c0d338e4be676245a3299cb0e56abc44c4e"
+      },
+      {
+        "path": "package-lock.json",
+        "sha256": "cbe0cee1363740bed5b6f1f6e643e6ca5e47a8649be9eec6289e7e2691bd49dc"
+      },
+      {
+        "path": "package.json",
+        "sha256": "5b7bc566f6e46b8d0a6b03782951ee2e568b7cad2d7f349d8ec7efa2071c7e42"
+      },
+      {
+        "path": "scripts/build.mjs",
+        "sha256": "d03d0f27f4462ea9721565cfc4c6dcafd98035c745b524b4ed642b2a9fee1f81"
+      },
+      {
+        "path": "scripts/package-app.mjs",
+        "sha256": "e7cfe097bffd9c7dc4d37505def88df7619a8514fd6c051865f67db91f44dfa1"
+      },
+      {
+        "path": "scripts/package-layout.d.mts",
+        "sha256": "e65b340349ed604e8c7b07169abe756e3548bfa09a0ed7bf3141c0ff1ceab5df"
+      },
+      {
+        "path": "scripts/package-layout.mjs",
+        "sha256": "7726f7868894302f23e17591d342927410974e8b2d39df1f98123bcf33cc0bd7"
+      },
+      {
+        "path": "scripts/start.mjs",
+        "sha256": "330db890cea3dc9e4e49c5b601b6f69ad352673ec17d55337edda7ba408f4397"
+      },
+      {
+        "path": "scripts/verify-app.ts",
+        "sha256": "76cb1378baddb85e92b679e7904ad5987ddb20b4cd387a8fe97de52b9f860e5c"
+      },
+      {
+        "path": "scripts/verify-package.mjs",
+        "sha256": "a10066013507b0c2fa07fd546fa213686b3360194ba31254f4ab32195c0e71f5"
+      },
+      {
+        "path": "src/app/application.ts",
+        "sha256": "5319a1a12462ad947d1e448dc783efe2569d951680a1bf44348b8316bc38a251"
+      },
+      {
+        "path": "src/app/archive.ts",
+        "sha256": "6eeeeb27b1eb313a7ac560e6a63fef067b30df93b7043b70390c40510cdfe5ae"
+      },
+      {
+        "path": "src/app/backend.ts",
+        "sha256": "7809ab683a9e1af7c973a5f8cb3b6520ea231c5ab389ecda4ad48a09a61ef5e9"
+      },
+      {
+        "path": "src/app/contracts.ts",
+        "sha256": "ecc7f3286a549284a5f4442cbe3a1f7b81d25f02b9b30bf0097410953bb53bb0"
+      },
+      {
+        "path": "src/app/conversation.ts",
+        "sha256": "f32eca1c8cddd17313d66503d264c995e40f8db41a25a3ce6c900b01b281dc6f"
+      },
+      {
+        "path": "src/app/health.ts",
+        "sha256": "79dc6696395b26e6333bf15fe2f05867df9503ea5a337b658f9bd574577da086"
+      },
+      {
+        "path": "src/app/model.ts",
+        "sha256": "51037866de60188ef80167fb57cc2841a8615886c26ba6fbe8e0e30810a40131"
+      },
+      {
+        "path": "src/app/packs.ts",
+        "sha256": "1c25aaa8fbd9b48ba2b93d0480997e63b28a455ff798abe8c425ae402ccd1e35"
+      },
+      {
+        "path": "src/app/secrets.ts",
+        "sha256": "7ac07cc98ed5f7dece98150d51a7fb1659780751cca43fa08b442177d355c48c"
+      },
+      {
+        "path": "src/app/ui-server.ts",
+        "sha256": "bf63c60218d7bf56500291fff1d8780f8fc5f079678fb13a7af32a1e424fcdea"
+      },
+      {
+        "path": "src/app/web-server.ts",
+        "sha256": "78e4e013d42ddceb444c6e4b46b6e083e346692d758d69a6e054f8ab637f0d74"
+      },
+      {
+        "path": "src/client/App.tsx",
+        "sha256": "deed2b32cf37321c6063e2b1b6902dd1db7f9b7446b85ca4eeedd5485c2e8956"
+      },
+      {
+        "path": "src/client/AudioPanel.tsx",
+        "sha256": "5e7b61f15e618202fd5e3536ffd55f47a6abe4fdbcc79f1d5c1b897423693b1e"
+      },
+      {
+        "path": "src/client/ExportPanel.tsx",
+        "sha256": "bd66d9052db6051d7ac7b6db9c1676540c02b0492294166222b9cee79c5e6060"
+      },
+      {
+        "path": "src/client/Preview.tsx",
+        "sha256": "eb2eadd0c262c6df0edbd1dda9c2ed082b96258f17fa8858ac27328e89104022"
+      },
+      {
+        "path": "src/client/ProjectHome.tsx",
+        "sha256": "852eaf514d6715fb2d1e4ee5629143e8f9d03c30d0e4d3f3afc7ea2693eceb7d"
+      },
+      {
+        "path": "src/client/ProviderDialog.tsx",
+        "sha256": "8ed09683077c95204210c00c776a47181582f74b77337da5aa5f7f0b826605e7"
+      },
+      {
+        "path": "src/client/Studio.tsx",
+        "sha256": "1d13916540d124a5afbf217fcac130964abadc586bccabc867b0a034d4ed6acd"
+      },
+      {
+        "path": "src/client/TaskPanel.tsx",
+        "sha256": "3b19442226a1cbd4c465405dfb18eb104292180a9b3277656d081c2fb902cbee"
+      },
+      {
+        "path": "src/client/app.css",
+        "sha256": "d7246090e797fe67d4d6c0539e8948416facace04f211c72cb93f49a1462a361"
+      },
+      {
+        "path": "src/client/controller.ts",
+        "sha256": "f8105140b33c50b2b77deec705414b917f9b2711a62620ca3cef3a2a96c78c3a"
+      },
+      {
+        "path": "src/client/graph-adapter.ts",
+        "sha256": "97ae18680e54a3a64330ff7523b6226785ecf9a6a090865cc6e5f00ad0b3dd57"
+      },
+      {
+        "path": "src/client/index.tsx",
+        "sha256": "1b2f88ca29133a0b6932d55e35a6e0d738bfe41d95e6f17363480226a7f767a8"
+      },
+      {
+        "path": "src/client/output-settings.tsx",
+        "sha256": "a149d048723a99bcb9dff5fb016574fec446386b78194d2425b3aab86de3a9d7"
+      },
+      {
+        "path": "src/client/preview-watchdog.ts",
+        "sha256": "c19da1a03608ed3ca763f1ae7ab66bfac923cf187b716ee3b93b90d59458dbd3"
+      },
+      {
+        "path": "src/client/project-ui.ts",
+        "sha256": "4bf860bdeb798e6197c8a97664d4c3bbe1525517716724d4a6e90b5dffdb4c84"
+      },
+      {
+        "path": "src/client/styles.css",
+        "sha256": "0a786f55e4f27465b9364213c3c7b882272c1bd344bd616e4859e373eea21f31"
+      },
+      {
+        "path": "src/client/ui.tsx",
+        "sha256": "bb5051f41e1386ec99dd4f8fe649d639b77d87804e2685aa081dee073941b28a"
+      },
+      {
+        "path": "src/core/default-source.ts",
+        "sha256": "89ee9f4adebf2b14b5a71ab1d65da437e6afbdf90344de67ed8ac3b6b5392ffc"
+      },
+      {
+        "path": "src/core/index.ts",
+        "sha256": "e27bf0f2f4b2c04ea9d985410f8aed8afebcc62ab6c09b57af8def4f322f3055"
+      },
+      {
+        "path": "src/core/project-paths.ts",
+        "sha256": "d4504ff601ba131f8a5aab764da7cf0f0bae83d9e4a063d70686bd4d6822e41e"
+      },
+      {
+        "path": "src/desktop/main.ts",
+        "sha256": "cab5f132bb5cd52bd4eaa168049ef31e2a85f2c737aa1a4be55719baf1b5d0d8"
+      },
+      {
+        "path": "src/desktop/native-secrets.ts",
+        "sha256": "74a6de1df5ec5a8e6f4ed8de319de8717a98db057d2e3953168bfa15455d333a"
+      },
+      {
+        "path": "src/desktop/preload.ts",
+        "sha256": "d8bf1b5509a794037bdb38a6cc869952947848eb2d7b740940ef5e6778ccb454"
+      },
+      {
+        "path": "src/host/audio.ts",
+        "sha256": "0a5194fe31b473092c71dcde94f4a7515e808da4c98f3575ca72920ded76fc7c"
+      },
+      {
+        "path": "src/host/directory-sync.ts",
+        "sha256": "dbb644af94f90b6461dc7ee57757f0a344772e0d361ceb83541227c87c5c5600"
+      },
+      {
+        "path": "src/host/generator.ts",
+        "sha256": "f9ccd7bda02994a80af910d986eff1131cda2781bdfd9677405fa6fe1f61c28a"
+      },
+      {
+        "path": "src/host/platform.ts",
+        "sha256": "f7db97b60bae0dc56f16f2d3d0e94b7484727e558f70dc32f8fce8125c3969f6"
+      },
+      {
+        "path": "src/host/project-hub.ts",
+        "sha256": "69d67acd0281d69008f8cb6d51b771be0325e1bddb3b5380f3b310713b1db314"
+      },
+      {
+        "path": "src/host/renderer.ts",
+        "sha256": "92d9b9addfadd24ecb9d572f23fa4ceb205574397d17c553cd9a5fd6703c9644"
+      },
+      {
+        "path": "src/host/service.ts",
+        "sha256": "a6e66defa567f53dbf0c050ba8fb171a596d35700235e97d163fa81ad485f6f1"
+      },
+      {
+        "path": "src/host/store.ts",
+        "sha256": "7fd3e1c511b3747b0d89b1f5fcb4e0a37eb2d80e3d7d0d7e87bb6ab44229ad0e"
+      },
+      {
+        "path": "src/host/tool-environment.ts",
+        "sha256": "024d88c617323e2eb5ab0396a71df526115375ddb668baf457a310d4e22ac8c8"
+      },
+      {
+        "path": "src/runtime/browser.ts",
+        "sha256": "b55caa9d8c897d792f045f7a2d53fec634dab2ec2f5e7b206880b7e1142ae037"
+      },
+      {
+        "path": "src/shared/tts-capability.ts",
+        "sha256": "21ff29bda5942df242131c2dcc494fa4daa6ee5109bf107e3a7e0164e63483ff"
+      },
+      {
+        "path": "src/shared/types.ts",
+        "sha256": "35319d46a70632dd3d388cc91f172bb84013f7d5afbff187993e7e69ca01b294"
+      },
+      {
+        "path": "tests/archive.test.ts",
+        "sha256": "3203c17b1b5fac73923497ce934c310012b7ceca2559a3230762e3365ac806b6"
+      },
+      {
+        "path": "tests/backend.test.ts",
+        "sha256": "8c73970f71af112a28ca079a1dd8069fa33331b604ef1827ed7cae0f29fbb77b"
+      },
+      {
+        "path": "tests/client-product.test.ts",
+        "sha256": "d7d0169d86b422cefa5e13a81357d7624c12bdb7ae1a3dd4427de13be98d7017"
+      },
+      {
+        "path": "tests/controller.test.ts",
+        "sha256": "63cd36152fad608df328e6e22912393878ba42d88efdf77f9828c1a990cc503e"
+      },
+      {
+        "path": "tests/conversation.test.ts",
+        "sha256": "191d216e0f75849d9fff2c499a081a5ba0b6d86700c6efe4a492a5ba843c235b"
+      },
+      {
+        "path": "tests/credential-ui.test.ts",
+        "sha256": "c24373560a7b8a8687e26099f4844f41f30f52f1af0612b33abab6db9327d5bd"
+      },
+      {
+        "path": "tests/fixtures/symlink.ts",
+        "sha256": "021dd068f027371ae4ed32a4eb0cd766ca71fe9579a2deb908245690e99dd29f"
+      },
+      {
+        "path": "tests/model-gateway.ts",
+        "sha256": "510d7861e30de803ca947769444bcee47b102020cd774f1c34170dbd33d54b30"
+      },
+      {
+        "path": "tests/model.test.ts",
+        "sha256": "79bfefb9d57d631ba93920187543dd448403d3fe9864b896d2208366e94a332b"
+      },
+      {
+        "path": "tests/native-secrets.test.ts",
+        "sha256": "7b50ac45108511cf6bf54d892b65bf6e55ff4d7a35ce5a038c78f48807f812d4"
+      },
+      {
+        "path": "tests/package.test.ts",
+        "sha256": "22c3b8be5b93233516d04b1e8a2c6f6b1dca485e23a7cc5790cb9e80ae62d848"
+      },
+      {
+        "path": "tests/project-paths.test.ts",
+        "sha256": "c3d48c3b37462857034c9d0db073fd59618b213a3ea8a8cdb23d2b73e1f8869d"
+      },
+      {
+        "path": "tests/storage-platform.test.ts",
+        "sha256": "20a6b31fd39f8e5c54eb1935b490e817b4643a0a3a3af9533bf0e7bfa1cda181"
+      },
+      {
+        "path": "tests/storage.test.ts",
+        "sha256": "e53c62a4eb090d644dab6c57212f8bf1c21dbd427513c48eae664effee169a9b"
+      },
+      {
+        "path": "tests/symlink-permissions.test.ts",
+        "sha256": "91b7c3d0b6a1c1394e9e2d88ce123230a8094b0f5d017c451a822e39487dd725"
+      },
+      {
+        "path": "tests/tool-environment.test.ts",
+        "sha256": "63d2e5219687dca42fe38cf35035afb792cebbdf80428cf6eb90ea3234bd27d4"
+      },
+      {
+        "path": "tests/tts-capability.test.ts",
+        "sha256": "63cb587f46cc10b82397cae599b055985e521544a4dd2b050b0fc2da6686e374"
+      },
+      {
+        "path": "tsconfig.json",
+        "sha256": "d2e27dc81578d1c8add063ed63e8669b5d92d7ddad1c077976979bfd91d2fe40"
+      }
+    ]
+  },
+  "historicalBaseline": "platform-baseline.json",
+  "evidenceDirectory": "Local .onboarding/logs; full logs intentionally excluded from repository",
+  "portableArtifact": {
+    "path": "artifacts/yingliu-studio-linux-x64.tar.gz",
+    "bytes": 126854864,
+    "sha256": "3af091431e36426be17bdf6aae6cf747ee869a401c9523a354801515aa83a7ca",
+    "externalRequirements": [
+      "Chrome/Chromium browser",
+      "FFmpeg and ffprobe",
+      "A Linux desktop session for GUI",
+      "libsecret or KWallet for saving credentials"
+    ]
+  }
+}

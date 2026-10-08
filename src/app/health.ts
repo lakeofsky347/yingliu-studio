@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import { constants } from 'node:fs';
-import type { EnvironmentInfo } from '../shared/types.ts';
+import type { EnvironmentInfo, SecretStoreStatus } from '../shared/types.ts';
 async function inspectTool(path:string,args:string[]){
   if(!path)return {available:false,version:'',message:'尚未找到，请在运行环境中选择可执行文件'};
   try{await access(path,constants.X_OK);}catch{return {available:false,version:'',message:'路径不存在或没有执行权限'};}
@@ -13,7 +13,7 @@ async function inspectTool(path:string,args:string[]){
     const timer=setTimeout(()=>{child.kill('SIGTERM');finish(false,'工具检查超时');},5000);timer.unref();
   });
 }
-export async function applicationHealth(environment:EnvironmentInfo,model:{hasKey:boolean;config:{model:string}},dataDirectory:string){
+export async function applicationHealth(environment:EnvironmentInfo,model:{hasKey:boolean;config:{model:string};credentialStatus?:SecretStoreStatus},dataDirectory:string){
   const [browser,ffmpeg,ffprobe]=await Promise.all([inspectTool(environment.browserPath,['--version']),inspectTool(environment.ffmpegPath,['-version']),inspectTool(environment.ffprobePath,['-version'])]);
-  return {dataDirectory,model:{configured:model.hasKey,model:model.config.model},tools:{browser:{path:environment.browserPath,...browser},ffmpeg:{path:environment.ffmpegPath,...ffmpeg},ffprobe:{path:environment.ffprobePath,...ffprobe}},canRender:browser.available&&ffmpeg.available&&ffprobe.available};
+  return {dataDirectory,model:{configured:model.hasKey,model:model.config.model,credentialStatus:model.credentialStatus},tools:{browser:{path:environment.browserPath,...browser},ffmpeg:{path:environment.ffmpegPath,...ffmpeg},ffprobe:{path:environment.ffprobePath,...ffprobe}},canRender:browser.available&&ffmpeg.available&&ffprobe.available};
 }

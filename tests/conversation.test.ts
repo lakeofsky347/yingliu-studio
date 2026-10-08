@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
-import { mkdtemp, mkdir, readFile, writeFile, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createProject, defaultSceneSource, updateShot } from '../src/core/index.ts';
@@ -9,6 +9,7 @@ import type { StudioSnapshot, RpcResult, VideoProject } from '../src/shared/type
 import type { BackendPort, ChatInput, SecretStore } from '../src/app/contracts.ts';
 import { authorizedImages, compileDirectorPlan, ConversationService } from '../src/app/conversation.ts';
 import { ProviderManager, type ModelMessage } from '../src/app/model.ts';
+import { createFileSymlinkOrSkip } from './fixtures/symlink.ts';
 
 class MemorySecrets implements SecretStore {values=new Map<string,string>();async get(ref:string){return this.values.get(ref);}async set(ref:string,value:string){this.values.set(ref,value);}async delete(ref:string){this.values.delete(ref);}}
 class FixtureBackend implements BackendPort {
@@ -112,10 +113,18 @@ test('shutdown waits canceled turn and restores pending turn as interrupted afte
   const file=join(directory,'conversations',createHash('sha256').update(backend.state.project!.id).digest('hex')+'.json');const raw=JSON.parse(await readFile(file,'utf8'));raw.turns.at(-1).status='pending';raw.messages.at(-1).status='pending';await writeFile(file,JSON.stringify(raw));const restored=await new ConversationService(backend,provider,directory).history(backend.state.project!.id);assert.equal(restored.turns!.at(-1)!.status,'interrupted');assert.equal(JSON.parse(await readFile(file,'utf8')).turns.at(-1).status,'interrupted');
 }));
 
-test('vision requires explicit per-turn authorization and enforces selected asset scope/bytes/dimensions/symlinks',()=>withDirectory(async directory=>{
+test('vision requires explicit per-turn authorization and enforces selected asset scope/bytes/dimensions',()=>withDirectory(async directory=>{
   const backend=new FixtureBackend();backend.state.project=createProject('images','topic');backend.state.root=join(directory,'project');await mkdir(join(backend.state.root,'assets'),{recursive:true});const png=Buffer.alloc(32);Buffer.from([137,80,78,71,13,10,26,10]).copy(png);png.writeUInt32BE(64,16);png.writeUInt32BE(64,20);await writeFile(join(backend.state.root,'assets','small.png'),png);
   backend.state.project.assets.push({id:'image-a',kind:'image',name:'图A',description:'',path:'assets/small.png'});backend.state.project.shots[0]!.assetIds=['image-a'];const config={id:'custom',name:'vision',baseUrl:'https://mock.invalid/v1',model:'vision-model',supportsVision:true,enableVision:true,maxVisionBytes:1024,maxVisionDimension:128};const input={...chat('观察这张图片',backend.state.project.id),shotId:backend.state.project.shots[0]!.id,imageAssetIds:['image-a']},signal=new AbortController().signal;
   assert.equal((await authorizedImages(backend.state,input,config,signal)).content.length,0);const sent=await authorizedImages(backend.state,{...input,allowImageUpload:true},config,signal);assert.equal(sent.ids[0],'image-a');assert.ok(sent.content.some(block=>block.type==='image_url'));
   await assert.rejects(authorizedImages(backend.state,{...input,allowImageUpload:true,shotId:backend.state.project.shots[1]!.id},config,signal),/未绑定/);png.writeUInt32BE(5000,16);await writeFile(join(backend.state.root,'assets','small.png'),png);await assert.rejects(authorizedImages(backend.state,{...input,allowImageUpload:true},config,signal),/像素尺寸/);
-  backend.state.project.assets[0]!.path='assets/link.png';await symlink(join(backend.state.root,'assets','small.png'),join(backend.state.root,'assets','link.png'));await assert.rejects(authorizedImages(backend.state,{...input,allowImageUpload:true},config,signal),/Symlinks/);
+}));
+
+test('vision refuses project-local file symlinks before reading image pixels',context=>withDirectory(async directory=>{
+  const backend=new FixtureBackend();backend.state.project=createProject('symlink image','topic');backend.state.root=join(directory,'project');await mkdir(join(backend.state.root,'assets'),{recursive:true});
+  const png=Buffer.alloc(32);Buffer.from([137,80,78,71,13,10,26,10]).copy(png);png.writeUInt32BE(64,16);png.writeUInt32BE(64,20);await writeFile(join(backend.state.root,'assets','small.png'),png);
+  backend.state.project.assets.push({id:'image-a',kind:'image',name:'图A',description:'',path:'assets/link.png'});backend.state.project.shots[0]!.assetIds=['image-a'];
+  const config={id:'custom',name:'vision',baseUrl:'https://mock.invalid/v1',model:'vision-model',supportsVision:true,enableVision:true,maxVisionBytes:1024,maxVisionDimension:128};const input={...chat('观察这张图片',backend.state.project.id),shotId:backend.state.project.shots[0]!.id,imageAssetIds:['image-a'],allowImageUpload:true};
+  if(!await createFileSymlinkOrSkip(context,join(backend.state.root,'assets','small.png'),join(backend.state.root,'assets','link.png')))return;
+  await assert.rejects(authorizedImages(backend.state,input,config,new AbortController().signal),/Symlinks/);
 }));
