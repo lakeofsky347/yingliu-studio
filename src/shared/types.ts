@@ -33,6 +33,11 @@ export interface VideoClip {
   speed:number; fit:'cover'|'contain'; audio:'mute'|'keep'|'extract';
 }
 export interface TtsSettings {endpoint:string;model:string;voice:string;apiKey?:string;speed:number;enabled:boolean;requestTimeoutMs?:number}
+export interface VideoStyle {
+  id:string;name:string;description:string;prompt:string;
+  sourceFormat:'markdown'|'json'|'zip'|'folder'|'custom';sourceName:string;
+  createdAt:string;updatedAt:string;
+}
 export interface ExportResult {
   id:string; path:string; url?:string; createdAt:string; revision:number;
   width:number; height:number; frameCount:number; duration:number; qa?:Record<string,unknown>;
@@ -42,7 +47,7 @@ export interface VideoProject {
   createdAt:string; updatedAt:string; revision:number; target:VideoTarget;
   assets:Asset[]; shots:Shot[]; shotOrder:string[]; graph:GraphLayout;
   outputs:ExportResult[]; extensions:Record<string,unknown>;
-  sessionIds?:string[];audioClips?:AudioClip[];videoClips?:VideoClip[];
+  sessionIds?:string[];audioClips?:AudioClip[];videoClips?:VideoClip[];videoStyle?:VideoStyle;
 }
 export interface SpecShot extends Shot { startFrame:number; endFrame:number; assets:Asset[]; videoClip?:VideoClip }
 export interface VideoSpec {
@@ -52,7 +57,7 @@ export interface VideoSpec {
 export interface SceneSource { html:string; css:string; js:string; shotPatch?:Partial<Shot> }
 export interface TaskState {
   id:string; kind:'storyboard'|'scenes'|'modify'|'preview'|'export'|'audio';
-  status:'running'|'complete'|'failed'|'cancelled'; progress:number; message:string;
+  status:'running'|'complete'|'failed'|'cancelled'|'interrupted'; progress:number; message:string;
   startedAt:string; finishedAt?:string; error?:string; shotId?:string; logPath?:string;
 }
 export interface EnvironmentSettings { browserPath:string; ffmpegPath:string; ffprobePath:string; maxVideoBytes?:number }
@@ -65,6 +70,7 @@ export interface StudioSnapshot {
   project:VideoProject|null; root:string|null; task:TaskState|null;
   previewUrl:string|null; previewRevision:number|null; assetBaseUrl?:string|null; providers:ProviderGroup[];
   environment:EnvironmentInfo; recent:{path:string;title:string;id:string}[];
+  styles?:VideoStyle[];
   sessionId?:string;focus?:{shotId?:string;frame?:number};audioUrl?:string|null;tts?:TtsSettings;ttsConfigured?:boolean;credentialStatus?:SecretStoreStatus;
 }
 export type RpcResult<T=unknown>={ok:true;value:T}|{ok:false;error:{code:string;message:string}};

@@ -1,8 +1,10 @@
-import type { ModelRoute, SceneSource, StudioApi, StudioSnapshot, VideoProject } from '../shared/types.ts';
+import type { ModelRoute, SceneSource, StudioApi, StudioSnapshot, VideoProject, VideoStyle } from '../shared/types.ts';
+
+import { SourceDraftStore, type SourceDraft } from './source-drafts.ts';
 
 export interface ProjectHistory {canUndo:boolean;canRedo:boolean;entries:{id:string;label:string;createdAt:string;revision:number}[];cursor:number}
 export interface StudioState {
-  snapshot:StudioSnapshot|null;loading:boolean;pending:boolean;saving:boolean;dirty:boolean;sourceDraft:boolean;conflict:boolean;
+  snapshot:StudioSnapshot|null;loading:boolean;pending:boolean;saving:boolean;dirty:boolean;sourceDraft:boolean;sourceDraftCount:number;draftSerial:number;conflict:boolean;styles:VideoStyle[];
   error:string;notice:string;scheme:'light'|'dark';selected:string|null;route:ModelRoute;
   canUndo:boolean;canRedo:boolean;history:ProjectHistory|null;localImages:Record<string,string>;focusFrame:number|null;focusSerial:number;
 }
@@ -34,21 +36,25 @@ export class StandaloneStudioApi implements StudioApi {
 }
 /** One owner for edits, persisted history, revision checks, and project task polling. */
 export class StudioController {
-  private state:StudioState={snapshot:null,loading:true,pending:false,saving:false,dirty:false,sourceDraft:false,conflict:false,error:'',notice:'',scheme:'dark',selected:null,route:{provider:'',model:''},canUndo:false,canRedo:false,history:null,localImages:{},focusFrame:null,focusSerial:0};
+  private state:StudioState={snapshot:null,loading:true,pending:false,saving:false,dirty:false,sourceDraft:false,sourceDraftCount:0,draftSerial:0,conflict:false,styles:[],error:'',notice:'',scheme:'dark',selected:null,route:{provider:'',model:''},canUndo:false,canRedo:false,history:null,localImages:{},focusFrame:null,focusSerial:0};
   private listeners=new Set<()=>void>();private disposed=false;
   private saveTimer:ReturnType<typeof setTimeout>|undefined;private pollTimer:ReturnType<typeof setTimeout>|undefined;
   private sourceDraftDirty=false;
   private editSerial=0;private dirty=false;private savingPromise:Promise<void>|null=null;private saveFailed=false;
-  private polling=false;private actionEpoch=0;private serverRevision:number|null=null;private serverProjectId:string|null=null;
+  private polling=false;private actionEpoch=0;private snapshotReadSerial=0;private serverRevision:number|null=null;private serverProjectId:string|null=null;
   private creativeHandler:((kind:'storyboard'|'scenes'|'modify',instruction:string,shotId?:string)=>Promise<void>)|null=null;
-  constructor(readonly api:StudioApi){}
+  private readonly drafts:SourceDraftStore;
+  constructor(readonly api:StudioApi,drafts?:SourceDraftStore){this.drafts=drafts??new SourceDraftStore();}
   getSnapshot=():StudioState=>this.state;
   subscribe=(fn:()=>void):(()=>void)=>{this.listeners.add(fn);return()=>{this.listeners.delete(fn);};};
   private update(patch:Partial<StudioState>):void{if(this.disposed)return;this.state={...this.state,...patch};for(const fn of this.listeners)fn();}
+  private draftState(projectId=this.state.snapshot?.project?.id):Pick<StudioState,'sourceDraft'|'sourceDraftCount'|'draftSerial'>{const count=projectId?this.drafts.list(projectId).length:0;return {sourceDraft:count>0||this.sourceDraftDirty,sourceDraftCount:count,draftSerial:this.state.draftSerial+1};}
   private accept(snapshot:StudioSnapshot,protectDraft=true,ownSave=false):void{
+    const previousRevision=this.serverRevision;
     const previous=this.state.snapshot?.project||null;const same=previous?.id===snapshot.project?.id;
     const keepProject=protectDraft&&same&&this.dirty;const conflict=keepProject&&!ownSave&&snapshot.project?.revision!==this.serverRevision;
     if(!keepProject||ownSave){this.serverProjectId=snapshot.project?.id??null;this.serverRevision=snapshot.project?.revision??null;}
+    if(ownSave&&same&&snapshot.project&&previousRevision!==null)for(const draft of this.drafts.list(snapshot.project.id)){if(draft.baseRevision===previousRevision)this.drafts.set({...draft,baseRevision:snapshot.project.revision});}
     const project=keepProject?previous:snapshot.project,changed=project?.id!==previous?.id;
     if(changed){this.dirty=false;this.update({history:null,canUndo:false,canRedo:false,localImages:{}});}
     const route=this.state.route;
@@ -56,16 +62,20 @@ export class StudioController {
     const provider=available.find(p=>p.id===route.provider)||available.find(p=>p.models.length);
     const model=provider?.models.find(m=>m.id===route.model)||provider?.models[0];
     const selected=this.state.selected;
-    this.update({snapshot:{...snapshot,project},loading:false,dirty:this.dirty,
+    this.update({snapshot:{...snapshot,project},loading:false,dirty:this.dirty,...this.draftState(project?.id),...(snapshot.styles?{styles:snapshot.styles}:{}),
       ...(changed?{selected:null,focusFrame:null,conflict:false}:{}),...(conflict?{conflict:true,error:'工程已在其他操作中更新。本地修改已保留；请先导出本地副本，再重新载入已保存版本。'}:{}),
       ...(!selected||project?.shots.some(s=>s.id===selected)||project?.assets.some(a=>a.id===selected)?{}:{selected:null}),route:{provider:provider?.id||'',model:model?.id||''}});
     if(snapshot.task?.status==='running')this.schedulePoll();
   }
   async load(force=false):Promise<void>{try{const snapshot=await this.api.call<StudioSnapshot>('catalog');if(force){this.dirty=false;this.update({dirty:false,conflict:false,saving:false});}this.accept(snapshot,!force);if(!this.state.conflict)this.update({error:''});await this.refreshHistory();}catch(error){this.update({loading:false,error:message(error)});}}
+  private snapshotReadGuard(projectId:string):()=>boolean{const epoch=this.actionEpoch,revision=this.serverRevision,edits=this.editSerial,read=++this.snapshotReadSerial;return()=>!this.disposed&&!this.state.pending&&!this.savingPromise&&this.state.snapshot?.project?.id===projectId&&this.actionEpoch===epoch&&this.serverRevision===revision&&this.editSerial===edits&&this.snapshotReadSerial===read;}
   async refreshHistory():Promise<void>{
-    const projectId=this.state.snapshot?.project?.id;if(!projectId)return;
-    try{const history=await this.api.call<ProjectHistory>('history',{projectId});if(this.state.snapshot?.project?.id===projectId&&Array.isArray(history.entries))this.update({history,canUndo:history.canUndo,canRedo:history.canRedo});}catch{/* A history read never discards an unsaved draft. */}
+    const projectId=this.state.snapshot?.project?.id,revision=this.serverRevision,epoch=this.actionEpoch;if(!projectId)return;
+    try{const history=await this.api.call<ProjectHistory>('history',{projectId});if(!this.disposed&&this.state.snapshot?.project?.id===projectId&&this.serverRevision===revision&&this.actionEpoch===epoch&&Array.isArray(history.entries))this.update({history,canUndo:history.canUndo,canRedo:history.canRedo});}catch{/* A history read never discards an unsaved draft. */}
   }
+  async refreshStyles():Promise<void>{try{const result=await this.api.call<{styles:VideoStyle[]}>('styles.list');if(Array.isArray(result.styles))this.update({styles:result.styles});}catch{/* A style-library read never prevents opening an existing project. */}}
+  async saveStyle(style:Partial<VideoStyle>):Promise<VideoStyle>{const result=await this.api.call<{style:VideoStyle;styles:VideoStyle[]}>('styles.save',{style});if(Array.isArray(result.styles))this.update({styles:result.styles});return result.style;}
+  async deleteStyle(id:string):Promise<void>{const result=await this.api.call<{styles:VideoStyle[]}>('styles.delete',{id});if(Array.isArray(result.styles))this.update({styles:result.styles});}
   async focusProject(project:string|{projectId?:string;path?:string;sessionId?:string;shotId?:string;frame?:number},focus:{shotId?:string;frame?:number;sessionId?:string}={}):Promise<void>{
     const payload=typeof project==='string'?{projectId:project,...focus}:project;await this.action('focus',payload);
     if(this.state.error)throw new Error(this.state.error);if(payload.projectId&&this.state.snapshot?.project?.id!==payload.projectId)throw new Error('工程定位未完成');
@@ -76,12 +86,20 @@ export class StudioController {
   async audio(payload:unknown):Promise<void>{await this.action('audio',payload);}
   private schedulePoll():void{if(this.disposed||this.polling||this.pollTimer)return;this.pollTimer=setTimeout(()=>{this.pollTimer=undefined;void this.poll();},700);}
   private async poll():Promise<void>{
-    if(this.disposed||this.polling)return;this.polling=true;const epoch=this.actionEpoch;
-    try{const snapshot=await this.api.call<StudioSnapshot>('current',{projectId:this.state.snapshot?.project?.id});if(epoch===this.actionEpoch&&!this.state.pending){this.accept(snapshot);if(snapshot.task?.status!=='running')await this.refreshHistory();}}catch(error){this.update({error:message(error)});}
+    if(this.disposed||this.polling)return;this.polling=true;
+    const projectId=this.state.snapshot?.project?.id,current=projectId?this.snapshotReadGuard(projectId):()=>false;
+    try{if(!projectId)return;const snapshot=await this.api.call<StudioSnapshot>('current',{projectId});if(current()&&snapshot.project?.id===projectId&&(this.serverRevision===null||snapshot.project.revision>=this.serverRevision)){this.accept(snapshot);if(snapshot.task?.status!=='running')await this.refreshHistory();}}catch(error){if(current())this.update({error:message(error)});}
     finally{this.polling=false;if(this.state.snapshot?.task?.status==='running')this.schedulePoll();}
   }
   setScheme=(scheme:'light'|'dark'):void=>this.update({scheme});select=(selected:string|null):void=>{if(this.sourceDraftDirty&&selected!==this.state.selected){this.update({error:'前端源码尚未保存，请保存源码后再切换镜头。'});return;}this.update({selected});};
-  setSourceDraftDirty(value:boolean):void{if(this.sourceDraftDirty===value)return;this.sourceDraftDirty=value;this.update({sourceDraft:value});}
+  setSourceDraftDirty(value:boolean):void{if(this.sourceDraftDirty===value)return;this.sourceDraftDirty=value;this.update(this.draftState());}
+  getSourceDraft(shotId:string,projectId=this.state.snapshot?.project?.id):SourceDraft|undefined{return projectId?this.drafts.get(projectId,shotId):undefined;}
+  sourceDrafts(projectId=this.state.snapshot?.project?.id):SourceDraft[]{return projectId?this.drafts.list(projectId):[];}
+  setSourceDraft(shotId:string,source:SceneSource,baseRevision?:number):void{const projectId=this.state.snapshot?.project?.id;if(!projectId)return;const previous=this.drafts.get(projectId,shotId);this.drafts.set({projectId,shotId,source,baseRevision:previous?.baseRevision??baseRevision??this.serverRevision??0,updatedAt:new Date().toISOString()});this.update({...this.draftState(),...(this.drafts.warning?{notice:this.drafts.warning}:{})});}
+  discardSourceDraft(shotId:string,projectId=this.state.snapshot?.project?.id):void{if(!projectId)return;this.drafts.delete(projectId,shotId);this.update({...this.draftState(),...(!this.dirty?{conflict:false,error:''}:{}),notice:'源码草稿已丢弃，已保存源码保持原样。'});}
+  persistDrafts():void{this.drafts.persist();if(this.drafts.warning)this.update({notice:this.drafts.warning});}
+  get confirmedRevision():number|null{return this.serverRevision;}
+  get hasBlockingChanges():boolean{return this.dirty||this.sourceDraftDirty;}
   setRoute=(route:ModelRoute):void=>this.update({route});clearError=():void=>{if(!this.state.conflict)this.update({error:''});};notify=(notice:string):void=>this.update({notice});
   setCreativeHandler(handler:typeof this.creativeHandler):void{this.creativeHandler=handler;}
   edit=(project:VideoProject,_record=true):void=>{
@@ -108,22 +126,23 @@ export class StudioController {
     this.savingPromise=operation;await operation;if(this.savingPromise===operation)this.savingPromise=null;
     if(this.dirty&&!this.saveFailed&&!this.state.conflict&&serial!==this.editSerial)await this.flush();
   }
-  async action(endpoint:string,payload:unknown={},notice=''):Promise<void>{
-    if(this.state.pending)return;this.actionEpoch++;this.update({pending:true,error:this.state.conflict?this.state.error:'',notice:''});
+  async action(endpoint:string,payload:unknown={},notice=''):Promise<boolean>{
+    if(this.state.pending)return false;this.actionEpoch++;this.update({pending:true,error:this.state.conflict?this.state.error:'',notice:''});
     try{
       await this.flush();if(this.sourceDraftDirty&&!['saveSource','restoreSource','reveal','environment','cancel'].includes(endpoint))throw new Error('前端源码尚未保存，请先在源码面板保存修改。');if(this.dirty)throw new Error(this.state.error||'项目尚未保存，请重试保存。');
+      if(this.state.sourceDraft&&['preview','export','generate','retry','undo','redo'].includes(endpoint))throw new Error('本工程有源码草稿，请保存或丢弃草稿后再执行此操作。切换面板会保留草稿。');
       const guard=['saveSource','restoreSource','apply','rename','undo','redo','retry'].includes(endpoint)?{expectedRevision:this.serverRevision}:{};
       const request=['create','open','focus'].includes(endpoint)?payload:{projectId:this.state.snapshot?.project?.id,...guard,...payload as object};
-      const snapshot=await this.api.call<StudioSnapshot>(endpoint,request);this.accept(snapshot,false);await this.refreshHistory();this.update({notice,conflict:false,error:''});
-    }catch(error){this.update({error:message(error)});}finally{this.update({pending:false});}
+      const snapshot=await this.api.call<StudioSnapshot>(endpoint,request);this.accept(snapshot,false,['saveSource','restoreSource','import','rename'].includes(endpoint));await this.refreshHistory();this.update({notice,conflict:false,error:''});return true;
+    }catch(error){this.update({error:message(error)});return false;}finally{this.update({pending:false});}
   }
   /** Background workflow refreshes never follow another project's global selection. */
   async refreshMediaProject():Promise<boolean>{
-    if(this.state.pending)return false;const projectId=this.state.snapshot?.project?.id,epoch=this.actionEpoch;if(!projectId)return false;
+    if(this.state.pending)return false;const projectId=this.state.snapshot?.project?.id;if(!projectId)return false;const current=this.snapshotReadGuard(projectId);
     const snapshot=await this.api.call<StudioSnapshot>('current',{projectId});
-    if(this.state.pending||this.actionEpoch!==epoch||this.state.snapshot?.project?.id!==projectId||snapshot.project?.id!==projectId)return false;
+    if(!current()||snapshot.project?.id!==projectId)return false;
     if(this.serverRevision!==null&&snapshot.project.revision<this.serverRevision)return true;
-    if(this.state.sourceDraft&&snapshot.project.revision!==this.serverRevision){this.update({conflict:true,error:'工程已由制作任务更新。前端源码草稿已保留，请先复制草稿，再重新载入已保存版本。'});return true;}
+    if(this.sourceDraftDirty&&snapshot.project.revision!==this.serverRevision){this.update({conflict:true,error:'工程已由制作任务更新。前端源码草稿已保留，请先复制草稿，再重新载入已保存版本。'});return true;}
     this.accept(snapshot,true);await this.refreshHistory();return true;
   }
   /** Media jobs return task records, not StudioSnapshot; preserve the editor's CAS boundary. */
@@ -146,8 +165,16 @@ export class StudioController {
     if(!this.state.route.provider||!this.state.route.model){this.update({error:'请在模型设置中配置创作模型。'});return;}await this.action('generate',{kind,instruction,shotId,...this.state.route});
   }
   async readSource(shotId:string):Promise<SceneSource>{return this.api.call<SceneSource>('source',{shotId,projectId:this.state.snapshot?.project?.id});}
-  async saveSource(shotId:string,source:SceneSource):Promise<void>{await this.action('saveSource',{shotId,source},'源码已保存，可以刷新预览。');if(!this.state.error)this.setSourceDraftDirty(false);}
-  async restoreSource(shotId:string):Promise<void>{await this.action('restoreSource',{shotId},'已恢复上次可用源码。');}
+  async saveSource(shotId:string,source:SceneSource,useCurrentRevision=false):Promise<boolean>{
+    const projectId=this.state.snapshot?.project?.id;if(!projectId)return false;
+    await this.flush();if(this.dirty)return false;
+    if(this.state.snapshot?.project?.id!==projectId){this.update({error:'工程已切换，源码草稿仍保留在原工程中。'});return false;}
+    const draft=this.drafts.get(projectId,shotId);
+    const success=await this.action('saveSource',{shotId,source,expectedRevision:useCurrentRevision?this.serverRevision:draft?.baseRevision??this.serverRevision},'源码已保存，可以刷新预览。');
+    if(success){const current=this.drafts.get(projectId,shotId);if(!current||JSON.stringify(current.source)===JSON.stringify(source))this.drafts.delete(projectId,shotId);this.sourceDraftDirty=false;this.update(this.draftState());}
+    return success;
+  }
+  async restoreSource(shotId:string):Promise<boolean>{const success=await this.action('restoreSource',{shotId},'已恢复上次可用源码。');if(success){this.discardSourceDraft(shotId);this.update({notice:'已恢复上次可用源码。'});}return success;}
   async importFile(file:File):Promise<void>{
     if(file.size>64*1024*1024){this.update({error:'此文件超过浏览器上传大小，请在“模型与素材生成”中通过本地路径导入。'});return;}
     if((file.type.startsWith('video/')||/\.(mp4|mov|m4v|webm|mkv)$/i.test(file.name))&&file.size>32*1024*1024){this.update({error:'视频文件超过 32 MiB，请在“模型与素材生成”中通过本地路径导入。'});return;}
@@ -158,9 +185,9 @@ export class StudioController {
     else this.update({error:'请选择图片、文字、音频或 MP4、MOV、WebM 视频。'});
   }
   get busy():boolean{return this.state.pending||this.state.snapshot?.task?.status==='running';}
-  get hasSourceDraft():boolean{return this.sourceDraftDirty;}
-  get hasUnsavedChanges():boolean{return this.dirty||this.sourceDraftDirty;}
-  async dispose():Promise<void>{clearTimeout(this.saveTimer);clearTimeout(this.pollTimer);await this.flush();this.disposed=true;this.listeners.clear();}
+  get hasSourceDraft():boolean{return this.state.sourceDraft;}
+  get hasUnsavedChanges():boolean{return this.dirty||this.state.sourceDraft;}
+  async dispose():Promise<void>{this.persistDrafts();clearTimeout(this.saveTimer);clearTimeout(this.pollTimer);await this.flush();this.disposed=true;this.listeners.clear();}
 }
 function message(error:unknown):string{return error instanceof Error?error.message:'操作未完成';}
 function readDataUrl(file:File):Promise<string>{return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(new Error('读取素材失败'));reader.readAsDataURL(file);});}

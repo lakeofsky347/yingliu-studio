@@ -10,6 +10,7 @@ import { TaskPanel, HistoryPanel } from './TaskPanel.tsx';
 import { ExportPanel } from './ExportPanel.tsx';
 import { MediaPanel, VideoClipEditor } from './MediaPanel.tsx';
 import { WorkflowPanel } from './WorkflowPanel.tsx';
+import { SourceEditor } from './SourceEditor.tsx';
 import { addPlacedShot } from './project-ui.ts';
 
 type DockTab='workflow'|'media'|'preview'|'audio'|'spec'|'source'|'environment'|'tasks'|'history'|'exports';
@@ -72,7 +73,7 @@ export function Studio({controller,currentSessionId,onOpenSession,onNew,onOpen,o
   },[controller,generating]);
   function edit(patch:Partial<VideoProject>){if(project)controller.edit({...project,...patch,revision:project.revision+1,updatedAt:new Date().toISOString()});}
   function shot(patch:Partial<Shot>){if(project&&selectedShot)controller.edit(updateShot(project,selectedShot.id,patch));}
-  function switchTab(next:DockTab):boolean{if(controller.hasSourceDraft&&next!=='source'){controller.notify('前端源码尚未保存，请保存源码后再切换面板。');return false;}setTab(next);return true;}
+  function switchTab(next:DockTab):boolean{controller.persistDrafts();setTab(next);return true;}
   async function create(automatic:boolean){const title=newTitle.trim()||'我的视频';await controller.action('create',{title,topic:newTopic.trim()});if(controller.getSnapshot().error)return;setNewOpen(false);setNewTitle('');setNewTopic('');if(automatic)await controller.generate('storyboard');}
   async function importFiles(files:FileList|null){if(!files)return;for(const file of Array.from(files))await controller.importFile(file);}
   async function refreshPreview(){await controller.action('preview');setPreviewKey(k=>k+1);}
@@ -89,7 +90,7 @@ export function Studio({controller,currentSessionId,onOpenSession,onNew,onOpen,o
       <div className="vs-project-title"><span className="vs-eyebrow">会话创作 · 镜头与帧查看</span><h1>{project?.title||'让想法连成一部视频'}</h1></div>
       <div className="vs-model-route"><span>创作模型</span><select aria-label="模型提供方" value={state.route.provider} onChange={e=>{const p=snapshot?.providers.find(v=>v.id===e.target.value);controller.setRoute({provider:e.target.value,model:p?.models[0]?.id||''});}}><option value="">选择提供方</option>{snapshot?.providers.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select><select aria-label="创作模型" value={state.route.model} onChange={e=>controller.setRoute({...state.route,model:e.target.value})}><option value="">选择模型</option>{provider?.models.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select></div>
       {project&&<div className="vs-session-link">{snapshot?.sessionId?<><span title={snapshot.sessionId}>已关联会话</span>{onOpenSession&&<button onClick={()=>onOpenSession(snapshot.sessionId!)}>返回会话 ↗</button>}</>:<span>独立项目</span>}{currentSessionId&&currentSessionId!==snapshot?.sessionId&&<button disabled={busy} onClick={()=>void controller.bindSession(currentSessionId)}>绑定当前会话</button>}</div>}
-      {project&&<div className="vs-project-status"><i className={state.saving?'is-saving':''}/>{state.conflict?'保存冲突':state.sourceDraft?'源码未保存':state.saving?'正在保存':state.dirty?'尚未保存':'已保存'}<span>v{project.revision}</span></div>}
+      {project&&<div className="vs-project-status"><i className={state.saving?'is-saving':''}/>{state.conflict?'保存冲突':state.sourceDraft?`${state.sourceDraftCount||1} 份源码草稿`:state.saving?'正在保存':state.dirty?'尚未保存':'已保存'}<span>v{project.revision}</span></div>}
     </section>
     {state.error&&<div className="vs-error" role="alert"><span>{state.error}</span>{state.dirty&&<Button icon="upload" onClick={()=>downloadText(`${project?.title||'影片'}-本地修改.json`,JSON.stringify(project,null,2),'application/json;charset=utf-8')}>保存本地副本</Button>}{state.conflict?<Button icon="refresh" onClick={()=>void controller.load(true)}>重新载入保存版本</Button>:state.dirty?<Button icon="check" onClick={()=>void controller.flush()}>重试保存</Button>:<Button icon="close" aria-label="关闭错误" onClick={controller.clearError}/>}</div>}
     {state.notice&&<div className="vs-notice" role="status"><Icon name="check"/>{state.notice}</div>}
@@ -169,15 +170,6 @@ export function Studio({controller,currentSessionId,onOpenSession,onNew,onOpen,o
   </main>;
 }
 
-function SourceEditor({controller,selectedShot,busy,version}:{controller:StudioController;selectedShot?:Shot;busy:boolean;version:string}){
-  const [source,setSource]=useState<SceneSource|null>(null),[language,setLanguage]=useState<'html'|'css'|'js'>('html'),[loading,setLoading]=useState(false),[error,setError]=useState(''),[dirty,setDirty]=useState(false);
-  useEffect(()=>{let active=true;if(!selectedShot){setSource(null);return;}setLoading(true);setError('');if(dirty){setLoading(false);return;}controller.readSource(selectedShot.id).then(value=>{if(active){setSource(value);setDirty(false);}}).catch(e=>{if(active)setError(e instanceof Error?e.message:'读取源码失败');}).finally(()=>{if(active)setLoading(false);});return()=>{active=false;};},[selectedShot?.id,controller,version]);
-  useEffect(()=>{controller.setSourceDraftDirty(dirty);return()=>controller.setSourceDraftDirty(false);},[controller,dirty]);
-  async function restore(){if(!selectedShot)return;try{await controller.restoreSource(selectedShot.id);if(controller.getSnapshot().error)throw new Error(controller.getSnapshot().error);const value=await controller.readSource(selectedShot.id);setSource(value);setDirty(false);setError('');}catch(cause){setError(cause instanceof Error?cause.message:'恢复源码失败');}}
-  if(!selectedShot)return <div className="vs-dock-empty"><Icon name="text"/><p>选中一个镜头，查看与编辑它的前端源码。</p></div>;
-  if(loading)return <div className="vs-loading"><span className="vs-spinner"/>读取镜头源码…</div>;
-  return <div className="vs-source"><div className="vs-source-toolbar"><span>{selectedShot.title}</span><div className="vs-code-tabs">{(['html','css','js'] as const).map(l=><button key={l} className={language===l?'is-active':''} onClick={()=>setLanguage(l)}>{l.toUpperCase()}</button>)}</div><span className="vs-source-dirty">{dirty?'尚未保存':'已保存'}</span><Button icon="undo" disabled={busy} onClick={()=>void restore()}>恢复上次可用</Button><Button className="vs-primary" icon="check" disabled={!source||!dirty||busy} onClick={()=>source&&void controller.saveSource(selectedShot.id,source).then(()=>{if(!controller.getSnapshot().error)setDirty(false);})}>保存源码</Button></div>{error&&<p className="vs-inline-error">{error}</p>}<textarea className="vs-code-editor" aria-label={`${language.toUpperCase()} 源码`} spellCheck={false} value={source?.[language]||''} onChange={e=>{setSource({...source||{html:'',css:'',js:''},[language]:e.target.value});setDirty(true);}} onKeyDown={e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();if(source&&dirty&&!busy)void controller.saveSource(selectedShot.id,source).then(()=>{if(!controller.getSnapshot().error)setDirty(false);});}if(e.key==='Tab'){e.preventDefault();const field=e.currentTarget,start=field.selectionStart,end=field.selectionEnd,text=field.value;setSource({...source||{html:'',css:'',js:''},[language]:text.slice(0,start)+'  '+text.slice(end)});setDirty(true);requestAnimationFrame(()=>field.setSelectionRange(start+2,start+2));}}}/><p className="vs-source-note">修改源码后保存，再刷新预览。镜头参数保持独立，源码中写死的属性由代码控制。</p></div>;
-}
 function Environment({controller,snapshot}:{controller:StudioController;snapshot:StudioSnapshot}){
   const [settings,setSettings]=useState({...snapshot.environment});useEffect(()=>setSettings({...snapshot.environment}),[snapshot.environment]);
   const [health,setHealth]=useState<{canRender:boolean;tools:Record<string,{available:boolean;version?:string;message?:string}>}|null>(null),[checking,setChecking]=useState(false),[error,setError]=useState('');

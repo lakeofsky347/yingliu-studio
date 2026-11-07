@@ -64,14 +64,14 @@ test('projects remain isolated and indexed project reopening preserves revisions
   }finally{await f.close();}
 });
 
-test('unfinished task journal is recovered as an explicit interrupted failure',async()=>{
+test('unfinished task journal is recovered with an explicit interrupted status',async()=>{
   const f=await fixture();try{
     const first=await f.backend.call<StudioSnapshot>('create',{title:'任务恢复'});const folder=join(first.root!,'.studio','tasks');await mkdir(folder,{recursive:true});
     const record={id:'interrupted-export',kind:'export',status:'running',progress:.4,message:'捕帧中',startedAt:'2026-10-06T00:00:00.000Z'};await writeFile(join(folder,record.id+'.json'),JSON.stringify(record));
     await f.backend.dispose();const restarted=new AppBackend({dataDirectory:f.dataDirectory,providers,credentials:f.credentials});
     try{
-      const current=await restarted.call<StudioSnapshot>('current',{projectId:first.project!.id});assert.equal(current.task!.status,'failed');assert.match(current.task!.error!,/TASK_INTERRUPTED/);assert.match(current.task!.message,/中断/);
-      const disk=JSON.parse(await readFile(join(folder,record.id+'.json'),'utf8'));assert.equal(disk.status,'failed');assert.ok(disk.finishedAt);
+      const current=await restarted.call<StudioSnapshot>('current',{projectId:first.project!.id});assert.equal(current.task!.status,'interrupted');assert.match(current.task!.error!,/TASK_INTERRUPTED/);assert.match(current.task!.message,/中断/);
+      const disk=JSON.parse(await readFile(join(folder,record.id+'.json'),'utf8'));assert.equal(disk.status,'interrupted');assert.ok(disk.finishedAt);
     }finally{await restarted.dispose();}
   }finally{await f.close();}
 });

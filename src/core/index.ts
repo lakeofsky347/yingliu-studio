@@ -1,4 +1,5 @@
 import type { Asset, Shot, VideoProject, VideoSpec, VideoTarget } from '../shared/types.js';
+import {normalizeVideoStyle} from '../shared/video-style.ts';
 import {inspectProjectPaths,safeRelativeProjectPath as safeRelativePath} from './project-paths.js';
 export { defaultSceneSource } from './default-source.js';
 
@@ -65,6 +66,7 @@ export function validateProject(project:VideoProject,options:{portablePaths?:boo
   if(typeof project.id!=='string'||!project.id.trim())errors.push('项目 ID 不能为空');
   if(typeof project.title!=='string'||!project.title.trim())errors.push('项目标题不能为空');
   if(typeof project.topic!=='string')errors.push('主题必须是文字');
+  if(project.videoStyle!==undefined){try{normalizeVideoStyle(project.videoStyle);}catch(error){errors.push(error instanceof Error?error.message:String(error));}}
   if(!Number.isInteger(project.revision)||project.revision<0)errors.push('项目 revision 无效');
   if(!Number.isFinite(project.targetDuration)||project.targetDuration<=0)errors.push('目标时长必须大于零');
   const target=project.target;

@@ -20,7 +20,8 @@
     "package:demo": "npm run package:app",
     "verify": "node --import tsx scripts/verify-app.ts",
     "verify:models": "node --import tsx scripts/verify-model-ui.ts",
-    "verify:film": "node --import tsx scripts/verify-multimodal-film.ts"
+    "verify:film": "node --import tsx scripts/verify-multimodal-film.ts",
+    "verify:sync": "node --import tsx scripts/verify-upstream-sync.ts"
   },
   "dependencies": {
     "@comfyorg/litegraph": "0.17.2",

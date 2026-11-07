@@ -11,7 +11,7 @@ const mount=document.getElementById('root');
 if(!mount)throw new Error('缺少应用挂载节点 #root');
 createRoot(mount).render(<App controller={controller} api={api}/>);
 void controller.load();
-const flush=()=>{void controller.flush();};
+const flush=()=>{controller.persistDrafts();void controller.flush();};
 window.addEventListener('pagehide',flush);
 window.addEventListener('blur',flush);
 window.yingliu?.onBeforeClose?.(async()=>{

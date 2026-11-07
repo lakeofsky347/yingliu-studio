@@ -86,7 +86,8 @@ export class AppSceneGenerator implements SceneGenerator {
     const content=[{type:'text',text:JSON.stringify({...input,
       inputBoundary:'当前调用仅发送文字与素材元数据；图片像素没有发送给模型。依据名称、用户说明与已绑定资产ID制作，不声称已理解图片内容。'})}];
     let output='';let stopped=false;
-    for await(const chunk of this.ctx.llm.stream({...route,messages:[{id:randomUUID(),role:'user',source:{kind:'user'},content}],system:SYSTEM,maxTokens,sessionId:project.sessionIds?.[0]??`video-studio-${randomUUID()}`,signal})){
+    const system=project.videoStyle?`${SYSTEM}\n\n用户选择的制作风格：${project.videoStyle.name}\n${project.videoStyle.prompt}`:SYSTEM;
+    for await(const chunk of this.ctx.llm.stream({...route,messages:[{id:randomUUID(),role:'user',source:{kind:'user'},content}],system,maxTokens,sessionId:project.sessionIds?.[0]??`video-studio-${randomUUID()}`,signal})){
       signal.throwIfAborted();
       if(chunk.type==='text-delta'){output+=chunk.text??'';this.onText(output);}
       if(chunk.type==='finish'){

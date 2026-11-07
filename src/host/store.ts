@@ -10,6 +10,7 @@ import { createProject, defaultSceneSource, validateProject, migrateProject } fr
 import {probeAudio} from './audio.js';
 import {importVideoFile,MAX_VIDEO_BYTES} from '../media/video.js';
 import {syncDirectory} from './directory-sync.js';
+import {atomicRename} from './atomic-rename.js';
 import {inspectProjectPaths,portableProjectPathReason,safeRelativeProjectPath} from '../core/project-paths.js';
 
 export interface StoreOptions {
@@ -52,7 +53,7 @@ async function atomicWrite(file:string,data:string|Buffer):Promise<void> {
   const temporary=file+'.tmp-'+randomUUID();
   try {
     const handle=await fs.open(temporary,'w');try{await handle.writeFile(data);await handle.sync();}finally{await handle.close();}
-    await fs.rename(temporary,file);
+    await atomicRename(temporary,file);
     await syncDirectory(path.dirname(file));
   }
   finally { await fs.rm(temporary,{force:true}); }
@@ -99,6 +100,12 @@ function scenePath(shot:Shot|string):string { return typeof shot==='string'?shot
 
 export class ProjectStore {
   readonly baseDirectory:string;
+  private static readonly projectQueues=new Map<string,Promise<unknown>>();
+  private queued<T>(root:string,work:()=>Promise<T>):Promise<T>{
+    const key=path.resolve(root),previous=ProjectStore.projectQueues.get(key)??Promise.resolve();
+    const result=previous.then(work),settled=result.then(()=>undefined,()=>undefined);ProjectStore.projectQueues.set(key,settled);
+    void settled.then(()=>{if(ProjectStore.projectQueues.get(key)===settled)ProjectStore.projectQueues.delete(key);});return result;
+  }
   private readonly versionCache=new Map<string,{record:StoredVersion;bytes:number}>();
   private cachedBytes=0;
   constructor(private options:StoreOptions={}) { this.baseDirectory=path.resolve(options.baseDirectory??path.join(os.homedir(),'Documents','YingliuProjects')); }
@@ -186,7 +193,10 @@ export class ProjectStore {
     const head:StoreState={version:1,current:baseline.id,undo:[],redo:[]};await atomicWrite(await projectPath(root,'.studio/state.json'),json(head));return head;
   }
   /** The atomic head rename is the commit point for project + every scene source. */
-  async commit(root:string,project:VideoProject,sourceChanges:Record<string,SceneSource>={},options:CommitOptions={}):Promise<VideoProject>{
+  commit(root:string,project:VideoProject,sourceChanges:Record<string,SceneSource>={},options:CommitOptions={}):Promise<VideoProject>{
+    return this.queued(root,()=>this.commitVersion(root,project,sourceChanges,options));
+  }
+  private async commitVersion(root:string,project:VideoProject,sourceChanges:Record<string,SceneSource>,options:CommitOptions):Promise<VideoProject>{
     validateStoredProject(project);
     const state=await this.ensureState(root),previous=state?await this.version(root,state.current):undefined;
     if(previous&&project.id!==previous.project.id)throw new Error('不能改写工程 ID');
@@ -231,24 +241,32 @@ export class ProjectStore {
     await atomicWrite(await projectPath(root,'project.json'),json(record.project));
     await atomicWrite(await projectPath(root,'.studio/projected.json'),json({version:1,current:record.id}));
   }
-  async open(root:string):Promise<VideoProject>{
+  open(root:string):Promise<VideoProject>{return this.queued(root,()=>this.openVersion(root));}
+  private async openVersion(root:string):Promise<VideoProject>{
     const state=await this.ensureState(root);if(!state)throw new Error('未找到工程');
     const record=await this.version(root,state.current);await this.projectVersion(root,record);
     const staging=await projectPath(root,'.studio/staging');await fs.rm(staging,{recursive:true,force:true});
     await this.remember(root,record.project);return structuredClone(record.project);
   }
-  async history(root:string):Promise<ProjectHistory>{
+  history(root:string):Promise<ProjectHistory>{return this.queued(root,()=>this.versionHistory(root));}
+  private async versionHistory(root:string):Promise<ProjectHistory>{
     const state=await this.ensureState(root);if(!state)throw new Error('未找到工程');
     const entries:HistoryEntry[]=[];
     for(const id of [...state.undo,state.current,...[...state.redo].reverse()]){const version=await this.version(root,id);entries.push({id,label:version.label,createdAt:version.createdAt,revision:version.project.revision});}
     return {canUndo:!!state.undo.length,canRedo:!!state.redo.length,cursor:state.undo.length,entries};
   }
-  async moveHistory(root:string,direction:'undo'|'redo',expectedRevision:number):Promise<VideoProject>{
+  moveHistory(root:string,direction:'undo'|'redo',expectedRevision:number):Promise<VideoProject>{return this.queued(root,()=>this.moveVersionHistory(root,direction,expectedRevision));}
+  private async moveVersionHistory(root:string,direction:'undo'|'redo',expectedRevision:number):Promise<VideoProject>{
     const state=await this.ensureState(root);if(!state)throw new Error('未找到工程');
     const current=await this.version(root,state.current);
     if(current.project.revision!==expectedRevision)throw Object.assign(new Error('工程版本冲突，请重新读取后再撤销或重做'),{code:'REVISION_CONFLICT'});
     const candidates=direction==='undo'?state.undo:state.redo,id=candidates.at(-1);if(!id)throw new Error(direction==='undo'?'没有可以撤销的变更':'没有可以重做的变更');
-    const target=await this.version(root,id),project=structuredClone(target.project);project.revision=current.project.revision+1;project.updatedAt=new Date().toISOString();
+    const target=await this.version(root,id),project=structuredClone(target.project);
+    // Export receipts and session associations outlive editable content.
+    project.outputs=structuredClone(current.project.outputs);
+    if(current.project.sessionIds!==undefined)project.sessionIds=structuredClone(current.project.sessionIds);else delete project.sessionIds;
+    if(Object.hasOwn(current.project.extensions,'sessionIds'))project.extensions.sessionIds=structuredClone(current.project.extensions.sessionIds);else delete project.extensions.sessionIds;
+    project.revision=current.project.revision+1;project.updatedAt=new Date().toISOString();
     validateStoredProject(project);
     const restored:StoredVersion={...target,id:randomUUID(),label:direction==='undo'?'撤销：'+current.label:'重做：'+target.label,createdAt:project.updatedAt,project};
     const stage=await projectPath(root,`.studio/staging/${restored.id}.json`);await atomicWrite(stage,json(restored));
