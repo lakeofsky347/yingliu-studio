@@ -6,9 +6,11 @@ import { addShot, bindAsset, compileSpec, createProject, deleteShot, reorderShot
 import { normalizeStoryboard, parseModelJson, parseSceneSource } from '../host/generator.ts';
 import { projectPath } from '../host/store.ts';
 import type { AudioClip, SceneSource, Shot, StudioSnapshot, VideoProject } from '../shared/types.ts';
-import type { BackendPort, ChatInput, ChatMessage, Conversation, ConversationTurn, ProviderConfig } from './contracts.ts';
+import type { BackendPort, ChatInput, ChatMessage, Conversation, ConversationTurn, ProviderConfig, ConversationServiceOptions } from './contracts.ts';
 import { DEMO_MODEL, DEMO_PROVIDER, demoSceneSource, demoStoryboard, ProviderManager, type ModelContent, type ModelMessage } from './model.ts';
 import { packBriefContext } from './packs.ts';
+import type { AgentTaskStatus, ValidationReceipt, AgentCandidatePayload } from '../agent/contracts.ts';
+import { contentHash } from '../agent/repository.ts';
 
 type Obj=Record<string,unknown>;
 type Intent='chat'|'discuss'|'create'|'modify';
@@ -40,9 +42,10 @@ const DIRECTOR=`你是映流 Studio 的对话导演。通过同一个多轮 mess
 video_project action=get读取当前工程；action=create提供title/topic/targetDuration/target，仅用户明确新建时使用。
 video_update arguments={expectedRevision,update:{title?,topic?,targetDuration?,target?,storyboard?:{shots:[...]},sourcesByIndex?:[source],addShots?:[{tempId,afterId?,title,intent,composition,action,durationSeconds,assetIds,referenceIds,transition,params,source}],deleteShotIds?:[ID],shotOrder?:[ID或tempId],shotPatches?:[{id,patch:{title?,intent?,composition?,action?,narration?,durationFrames?,durationSeconds?,transition?,assetIds?,referenceIds?,params?}}],assetBindings?:[{shotId,assetId,kind:"asset|reference",remove?:true}],sources?:[{shotId,source}],audioClips?:[...]}}。已有工程不要使用storyboard或全量shots覆盖；稳定ID/sourcePath由应用控制。删除、重排、添加要符合用户明确请求。初次storyboard每镜用title,intent,composition,action,durationSeconds,assetIds,referenceIds,transition,params；sourcesByIndex每镜一份真实源码。新增镜必须给source。
 若工程 videoClips 中有绑定该镜头的片段，宿主已按当前帧绘制视频底图。ctx.hasVideo 表示底图存在，ctx.video 给出 assetId/sourceFrame/time。场景源码仅叠加文字或图形，不用不透明全屏背景遮挡底图，不自行启动 video 播放或累计时间。
-video_inspect arguments={shotId?,includeSource?:true}读取当前已有源码/规范；当前不会返回截图像素。video_render action=preview/check要求提交后预览；默认创作/源码修改后应用检查。video_audio 仅调整已导入音轨的add/update/remove，不导入任意路径、不远程合成。
+video_inspect arguments={shotId?,includeSource?:true}读取当前已有源码/规范；当前不会返回截图像素。video_render action=preview/check要求实际运行检查；创作/源码修改必须先验证候选再提交。video_audio 仅调整已导入音轨的add/update/remove，不导入任意路径、不远程合成。
 参数只填写要改的字段，保留用户未要求修改的标题、时长、文字、布局和主链。用户选中镜头或明确第二/第三镜时只改对应ID；用户明确全片、删除或重排时可处理需要的范围。素材仅引用项目已有ID，不能编造路径或素材；图片若未明确启用发送，仅元信息进入上下文。
 源码为 {html,css,js}，JS ES模块导出render(ctx)，可导出async ready(ctx)。ctx含root,canvas,ctx2d,params,assets,frame,localFrame,progress,time,duration,width,height。按帧独立求值支持重复/倒序，用ctx.params保持可编辑，不使用墙钟/autoplay，不联网、不导入包、不读写文件。所有文字和图像加载都要符合实际资源就绪。
+内置协作工具：agent_delegate arguments={goal,role:"scene|vision|director",shotIds:[授权镜头ID],mode:"team|subagent"}委派独立子会话；agent_wait arguments={taskId}等待；agent_result arguments={taskId}取真实结果；agent_cancel arguments={taskId}停止本轮子任务；agent_accept arguments={candidateId}采用已经验收的成员候选，完整源码由宿主合并，不要转抄进上下文。不要编造任务ID；委派/读取与工程写动作分轮执行。子代理结果是候选，只有当前主会话可采用。done:true仅申请完成，修改请求必须有可验证的实际修改；无法完成时明确说明阻碍。
 只陈述已发生的检查。素材像素是否发送以imageEvidence为准；未发送不能称看过图像。读取规范、运行检查、视觉观察、人工观看是不同回执。内置配方是可选简报参考，不代表现成风格渲染器已实现。`;
 
 interface PreparedPlan {intent:Intent;reply:string;candidate:VideoProject|null;sources:{shotId:string;source:SceneSource}[];mutated:boolean;create:boolean;preview:boolean;inspect:Obj[]}
@@ -114,84 +117,196 @@ export async function authorizedImages(snapshot:StudioSnapshot,input:ChatInput,c
   return {content,ids:[...requested]};
 }
 
-/** Durable, cancelable conversations; model plans commit once after complete validation. */
+export function validateChatInput(input:ChatInput):void {
+  if(!input||typeof input.sessionId!=='string'||!input.sessionId.trim()||typeof input.operationId!=='string'||!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(input.operationId)||!Object.hasOwn(input,'expectedRevision')||input.expectedRevision!==null&&(!Number.isSafeInteger(input.expectedRevision)||input.expectedRevision<0))throw Object.assign(new Error('对话请求必须提供 sessionId、operationId 和 expectedRevision'),{code:'AGENT_CONTEXT_REQUIRED'});
+  if(input.projectId&&input.expectedRevision===null)throw Object.assign(new Error('已有工程必须提供 expectedRevision'),{code:'REVISION_REQUIRED'});
+}
+const externalTools=new Set(['agent_delegate','agent_wait','agent_result','agent_cancel','agent_accept']);
+const fail=(code:string,message:string)=>Object.assign(new Error(message),{code});
+
+
+/** Three-way merge keeps child source artifacts local and refuses overlapping edits. */
+export function mergeAcceptedCandidates(base:VideoProject,current:VideoProject,sources:{shotId:string;source:SceneSource}[],accepted:AgentCandidatePayload[]){
+  const equal=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
+  const merge=(original:any,left:any,right:any,path:string):any=>{
+    if(equal(original,right))return structuredClone(left);if(equal(original,left)||equal(left,right))return structuredClone(right);
+    if(Array.isArray(original)&&Array.isArray(left)&&Array.isArray(right)&&[...original,...left,...right].every(item=>item&&typeof item==='object'&&typeof item.id==='string')){
+      const ids=[...new Set([...left,...right].map(item=>item.id))];return ids.map(id=>merge(original.find((item:any)=>item.id===id),left.find((item:any)=>item.id===id),right.find((item:any)=>item.id===id),path+'.'+id)).filter(item=>item!==undefined);
+    }
+    if(original&&left&&right&&typeof original==='object'&&typeof left==='object'&&typeof right==='object'&&!Array.isArray(original)&&!Array.isArray(left)&&!Array.isArray(right))return Object.fromEntries([...new Set([...Object.keys(original),...Object.keys(left),...Object.keys(right)])].map(key=>[key,merge(original[key],left[key],right[key],path+'.'+key)]).filter(([,value])=>value!==undefined));
+    throw fail('CANDIDATE_SCOPE_CONFLICT','成员候选与当前计划重复修改 '+path+'，请重新规划');
+  };
+  let project=structuredClone(current);const result=new Map(sources.map(item=>[item.shotId,item.source]));
+  for(const candidate of accepted){if(candidate.project.id!==base.id||candidate.baseRevision!==base.revision)throw fail('REVISION_CONFLICT','成员候选基线与当前工程不一致');project=merge(base,project,candidate.project,'project');for(const [shotId,source]of Object.entries(candidate.sources)){if(result.has(shotId)&&!equal(result.get(shotId),source))throw fail('CANDIDATE_SCOPE_CONFLICT','成员候选与当前计划重复修改镜头源码 '+shotId);result.set(shotId,structuredClone(source));}}
+  return {project,sources:[...result].map(([shotId,source])=>({shotId,source}))};
+}
+
+/** One isolated session. The facade supplies durable cross-process task/lease hooks. */
 export class ConversationService {
-  private releaseModel?:()=>void;private controller?:AbortController;private running?:Promise<unknown>;private activeTurnId?:string;private activeProjectId?:string;private ownedTaskId?:string;private writes:Promise<void>=Promise.resolve();private cancelWork:Promise<unknown>=Promise.resolve();
-  constructor(private backend:BackendPort,private providers:ProviderManager,private dataDirectory:string){}
-  private filename(projectId?:string){return join(this.dataDirectory,'conversations',createHash('sha256').update(projectId??'unbound').digest('hex')+'.json');}
-  private persist(conversation:Conversation){const saved=structuredClone(conversation);const work=this.writes.then(async()=>{await mkdir(join(this.dataDirectory,'conversations'),{recursive:true});const path=this.filename(saved.projectId),temporary=path+'.tmp-'+randomUUID();await writeFile(temporary,JSON.stringify(saved,null,2)+'\n');await rename(temporary,path);});this.writes=work.catch(()=>{});return work;}
-  async history(projectId?:string):Promise<Conversation>{
-    try{const value=object(JSON.parse(await readFile(this.filename(projectId),'utf8')));if(typeof value.id!=='string'||!Array.isArray(value.messages)||value.projectId!==projectId)throw new Error('对话文件格式无效');const conversation=value as unknown as Conversation;conversation.turns??=[];let changed=false;
-      for(const turn of conversation.turns)if(turn.status==='pending'&&turn.id!==this.activeTurnId){turn.status='interrupted';turn.error='应用上次退出时本轮未完成；可重试请求';turn.updatedAt=new Date().toISOString();for(const m of conversation.messages)if(m.turnId===turn.id)m.status='interrupted';changed=true;}if(changed)await this.persist(conversation);return conversation;
-    }catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;return {id:randomUUID(),...(projectId?{projectId}:{}),messages:[],turns:[],provider:'custom',model:(await this.providers.settings()).config.model};}
+  private releaseModel?:()=>void;private controller?:AbortController;private running?:Promise<unknown>;
+  private activeTurnId?:string;private activeProjectId?:string;private ownedTaskId?:string;
+  private writes:Promise<void>=Promise.resolve();private cancelWork:Promise<unknown>=Promise.resolve();
+  private sessionId?:string;private turn?:ConversationTurn;
+  constructor(private backend:BackendPort,private providers:ProviderManager,private dataDirectory:string,private options:ConversationServiceOptions={}){this.sessionId=options.sessionId;}
+  private filename(){return join(this.dataDirectory,'conversations-v2',createHash('sha256').update(this.sessionId??'default').digest('hex')+'.json');}
+  private persist(conversation:Conversation){
+    conversation.sessionId=this.sessionId;conversation.schemaVersion=2;
+    if(this.options.execution?.save)return this.options.execution.save(structuredClone(conversation));
+    const saved=structuredClone(conversation),work=this.writes.then(async()=>{await mkdir(join(this.dataDirectory,'conversations-v2'),{recursive:true});const path=this.filename(),temporary=path+'.tmp-'+randomUUID();await writeFile(temporary,JSON.stringify(saved,null,2)+'\n');await rename(temporary,path);});this.writes=work.catch(()=>{});return work;
   }
-  private cancelOwned(){const projectId=this.activeProjectId,taskId=this.ownedTaskId;if(projectId&&taskId)this.cancelWork=this.backend.call<StudioSnapshot>('current',{projectId}).then(snapshot=>{if(snapshot.task?.id===taskId&&snapshot.task.status==='running')return this.backend.call('cancel',{projectId});}).catch(()=>{});}
+  async history(projectId?:string):Promise<Conversation>{
+    let conversation:Conversation|undefined;
+    if(this.options.execution?.load)conversation=await this.options.execution.load();
+    else try{conversation=JSON.parse(await readFile(this.filename(),'utf8')) as Conversation;}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
+    if(conversation){if(!conversation.id||!Array.isArray(conversation.messages)||conversation.sessionId&&conversation.sessionId!==this.sessionId)throw new Error('会话记录身份或格式无效');return structuredClone(conversation);}
+    return {id:randomUUID(),sessionId:this.sessionId,schemaVersion:2,...(projectId?{projectId}:{}),messages:[],turns:[],provider:'custom',model:(await this.providers.settings()).config.model};
+  }
+  private async phase(status:AgentTaskStatus,patch:Record<string,unknown>={}){if(this.turn)this.turn.phase=status;await this.options.execution?.phase?.(status,patch);}
+  private async reserve(kind:'modelCalls'|'toolCalls',amount=1){
+    if(this.turn){this.turn[kind]=(this.turn[kind]??0)+amount;if(this.turn[kind]!>(kind==='modelCalls'?12:128))throw fail('AGENT_BUDGET_EXCEEDED','本轮调用预算已用尽');}
+    await this.options.execution?.reserve?.({[kind]:amount});
+  }
+  private cancelOwned(){const projectId=this.activeProjectId,taskId=this.ownedTaskId;if(projectId&&taskId)this.cancelWork=this.backend.call('cancel',{projectId,expectedTaskId:taskId}).catch(()=>{});}
   cancel():void{this.controller?.abort(new Error('用户已取消对话'));this.cancelOwned();}
-  activity():{running:boolean;turnId?:string;projectId?:string;taskId?:string}{return {running:!!this.controller,turnId:this.activeTurnId,projectId:this.activeProjectId,taskId:this.ownedTaskId};}
+  activity(){return {running:!!this.controller,sessionId:this.sessionId,turnId:this.activeTurnId,projectId:this.activeProjectId,taskId:this.options.execution?.taskId??this.ownedTaskId,phase:this.turn?.phase};}
   hasActiveTurn():boolean{return !!this.controller;}
   async shutdown():Promise<void>{this.cancel();await this.running?.catch(()=>{});await this.cancelWork;await this.writes;}
   async send(input:ChatInput):Promise<{conversation:Conversation;snapshot:StudioSnapshot}>{
-    if(this.controller)throw new Error('已有对话进行中，请等待或取消');const controller=new AbortController();this.controller=controller;
-    const running=this.run(input,controller);this.running=running;try{return await running;}finally{this.releaseModel?.();this.releaseModel=undefined;this.controller=undefined;this.activeTurnId=undefined;this.activeProjectId=undefined;this.ownedTaskId=undefined;this.running=undefined;}
+    validateChatInput(input);if(this.sessionId&&this.sessionId!==input.sessionId)throw fail('SESSION_SCOPE_VIOLATION','请求不属于当前会话');this.sessionId=input.sessionId;
+    if(this.controller)throw fail('SESSION_BUSY','此会话已有任务进行中，请等待或取消');
+    const controller=new AbortController();this.controller=controller;const running=this.run(input,controller);this.running=running;
+    try{return await running;}finally{this.releaseModel?.();this.releaseModel=undefined;this.controller=undefined;this.activeTurnId=undefined;this.activeProjectId=undefined;this.ownedTaskId=undefined;this.running=undefined;this.turn=undefined;}
+  }
+  private async validate(snapshot:StudioSnapshot,project:VideoProject,sources:{shotId:string;source:SceneSource}[],signal:AbortSignal):Promise<ValidationReceipt>{
+    signal.throwIfAborted();await this.phase('validating');await this.reserve('toolCalls');
+    const input={projectId:snapshot.project?.id,expectedRevision:snapshot.project?.revision??null,candidate:{project,sources:Object.fromEntries(sources.map(item=>[item.shotId,item.source]))},signal};
+    const receipt=this.options.execution?.validate?await this.options.execution.validate(input):await this.backend.call<ValidationReceipt>('candidate.validate',input);
+    signal.throwIfAborted();if(!receipt||receipt.status!=='passed'||!receipt.id||!receipt.candidateHash||receipt.baseRevision!==(snapshot.project?.revision??0)||['structure','syntax','assets','runtime'].some(id=>!receipt.checks?.some(check=>check.id===id&&check.status==='passed')))throw fail('CANDIDATE_VALIDATION_FAILED','候选运行验证未通过：'+(receipt?.checks?.filter(check=>check.status==='failed').map(check=>check.message??check.id).join('；')||'缺少有效验证回执'));
+    if(this.turn)this.turn.validation=receipt;return receipt;
+  }
+  private async mutate(endpoint:'create'|'apply',payload:Record<string,unknown>,input:ChatInput,signal:AbortSignal):Promise<StudioSnapshot>{
+    signal.throwIfAborted();await this.options.execution?.assertComplete?.();await this.phase('committing');await this.reserve('toolCalls');
+    const {validationId:_validationId,...candidatePayload}=payload,logicalPayload={endpoint,...candidatePayload};
+    const commitId=(this.options.execution?.taskId??input.operationId)+'.commit.'+contentHash(logicalPayload).slice(0,16);
+    const metadata=this.options.execution?.mutation?await this.options.execution.mutation(commitId,logicalPayload):{operation:{id:commitId,payloadHash:contentHash(logicalPayload)}};
+    signal.throwIfAborted();const saved=await this.backend.call<StudioSnapshot>(endpoint,{...payload,...metadata,sessionId:input.sessionId,operationId:input.operationId});
+    if(this.turn&&saved.project){this.turn.committedRevision=saved.project.revision;this.turn.request.projectId=saved.project.id;await this.phase('reconciling',{committedRevision:saved.project.revision,checkpoint:'committed'});}
+    return saved;
   }
   private async run(original:ChatInput,controller:AbortController):Promise<{conversation:Conversation;snapshot:StudioSnapshot}>{
-    const fixture=original.provider===DEMO_PROVIDER&&this.providers.fixtureEnabled();const selection=original.role??{provider:original.provider,model:original.model};const settings=await this.providers.settings(fixture?undefined:selection);if(!fixture&&!(settings.ready??settings.hasKey))throw new Error(settings.credentialStatus?.error??'请先在模型设置中配置当前应用的API Key；本轮没有创建或修改工程');
-    if(!fixture){const route=await this.providers.registry.resolve(selection);this.releaseModel=this.providers.registry.acquire(route.connection.id,route.model.id);}
-    let conversation=await this.history(original.projectId),input={...original,...(!fixture&&settings.route?settings.route:{})};const retry=input.retryTurnId?conversation.turns?.find(t=>t.id===input.retryTurnId):undefined;
-    if(input.retryTurnId&&!retry)throw new Error('重试回合不存在');if(retry&&retry.status==='pending')throw new Error('该回合仍在运行');if(retry)input={...retry.request,...input,message:input.message.trim()||retry.request.message,projectId:input.projectId??retry.request.projectId};
-    if(!input.message.trim()||input.message.length>20000)throw new Error('制作请求须为1–20,000字符');
-    const signal=AbortSignal.any([controller.signal,AbortSignal.timeout(Math.min(900000,(settings.config.requestTimeoutMs??90000)*4+30000))]);const onAbort=()=>this.cancelOwned();signal.addEventListener('abort',onAbort,{once:true});
-    const now=new Date().toISOString(),turn:ConversationTurn={id:randomUUID(),request:structuredClone(input),status:'pending',createdAt:now,updatedAt:now,...(retry?{retryOf:retry.id}:{})};this.activeTurnId=turn.id;conversation.provider=input.provider;conversation.model=input.model;conversation.turns??=[];conversation.turns.push(turn);conversation.messages.push(message('user',input.message,turn.id,'pending'));await this.persist(conversation);const originalProjectId=conversation.projectId;
-    let snapshot:StudioSnapshot;let committed=false;
-    try{signal.throwIfAborted();snapshot=await this.backend.call('current',input.projectId?{projectId:input.projectId}:{});this.activeProjectId=snapshot.project?.id;const requested=inferIntent(input,!!snapshot.project?.shots.length);let reply:string;
-      if(fixture){const result=await this.fixture(snapshot,input,signal);snapshot=result.snapshot;reply=result.reply;committed=result.mutated;}
-      else{const images=await authorizedImages(snapshot,input,settings.config,signal);turn.imageAssetIds=images.ids;await this.persist(conversation);const result=await this.direct(conversation,snapshot,input,requested,settings.config,images,signal);snapshot=result.snapshot;reply=result.reply;committed=result.committed;}
-      if(committed&&snapshot.project){turn.committedRevision=snapshot.project.revision;turn.request.projectId=snapshot.project.id;this.activeProjectId=snapshot.project.id;
-        if(conversation.projectId!==snapshot.project.id){const old=structuredClone(conversation);old.projectId=originalProjectId;await this.persist(old);conversation.projectId=snapshot.project.id;await this.persist(conversation);}
-        try{snapshot=await this.preview(snapshot,signal);reply+=' 工程已保存，代码与关键帧运行检查完成。';}
-        catch(error){throw new Error(`工程 v${turn.committedRevision} 已保存；预览检查未完成，需要修复或撤销：${errorText(error)}`);}
+    let conversation=await this.history(original.projectId);if(conversation.projectId&&original.projectId!==conversation.projectId)throw fail('SESSION_SCOPE_VIOLATION','会话工程与请求工程不一致');
+    const requestHash=this.options.execution?.requestHash??contentHash(original);
+    const duplicate=conversation.turns?.find(turn=>turn.operationId===original.operationId);
+    if(duplicate&&(duplicate.requestHash??contentHash(duplicate.request))!==requestHash)throw fail('OPERATION_MISMATCH','同一 operationId 对应不同请求');
+    if(duplicate?.status==='succeeded')return {conversation,snapshot:await this.backend.call('current',conversation.projectId?{projectId:conversation.projectId}:{})};
+    if(duplicate&&!original.retryTurnId)throw fail('OPERATION_ALREADY_RECORDED','此操作已有回执，请继续原任务或使用新的 operationId');
+    const retry=original.retryTurnId?conversation.turns?.find(turn=>turn.id===original.retryTurnId):undefined;
+    if(original.retryTurnId&&!retry)throw fail('TURN_NOT_FOUND','重试回合不存在');if(retry?.status==='pending')throw fail('SESSION_BUSY','该回合仍在运行');
+    let input:ChatInput=retry?{...retry.request,...original,message:original.message.trim()||retry.request.message}:structuredClone(original);
+    if(!input.message?.trim()||input.message.length>20000)throw new Error('制作请求须为1–20,000字符');
+    const fixture=input.provider===DEMO_PROVIDER&&this.providers.fixtureEnabled(),selection=input.role??{provider:input.provider,model:input.model};
+    const settings=await this.providers.settings(fixture?undefined:selection),resume=await this.options.execution?.reconcile?.();
+    const committedRevision=retry?.committedRevision??resume?.committedRevision;
+    if(committedRevision===undefined&&!fixture&&!(settings.ready??settings.hasKey))throw new Error(settings.credentialStatus?.error??'请先在模型设置中配置当前应用的API Key；本轮没有创建或修改工程');
+    if(committedRevision===undefined&&!fixture){const route=await this.providers.registry.resolve(selection);this.releaseModel=this.providers.registry.acquire(route.connection.id,route.model.id);}
+    if(!fixture&&settings.route)input={...input,...settings.route};
+    const signal=AbortSignal.any([controller.signal,AbortSignal.timeout(Math.min(900000,(settings.config.requestTimeoutMs??90000)*4+30000))]);
+    const now=new Date().toISOString(),turn:ConversationTurn={id:randomUUID(),request:structuredClone(input),operationId:input.operationId,requestHash,taskId:this.options.execution?.taskId,status:'pending',phase:'preflight',createdAt:now,updatedAt:now,modelCalls:0,toolCalls:0,...(retry?{retryOf:retry.id}:{})};
+    this.turn=turn;this.activeTurnId=turn.id;conversation.provider=input.provider;conversation.model=input.model;conversation.turns??=[];conversation.turns.push(turn);conversation.messages.push(message('user',input.message,turn.id,'pending'));await this.persist(conversation);
+    let snapshot:StudioSnapshot;let committed=committedRevision!==undefined;
+    try{
+      signal.throwIfAborted();await this.phase('preflight');snapshot=await this.backend.call('current',input.projectId?{projectId:input.projectId}:{});if(!input.projectId)snapshot={...snapshot,project:null,root:null,task:null,previewUrl:null,previewRevision:null};this.activeProjectId=snapshot.project?.id;
+      if(input.projectId&&snapshot.project?.revision!==input.expectedRevision||!input.projectId&&input.expectedRevision!==null)throw fail('REVISION_CONFLICT','工程版本已变化，请刷新后发起请求');
+      let reply:string;
+      if(committedRevision!==undefined){
+        if(!snapshot.project||snapshot.project.revision<committedRevision)throw fail('COMMIT_RECEIPT_MISMATCH','已提交回合无法与当前工程对账，请检查历史版本');
+        turn.committedRevision=committedRevision;await this.validate(snapshot,snapshot.project,[],signal);reply='已重新验证已提交工程；本次没有重复执行原制作动作。';
+      }else{
+        const images=await authorizedImages(snapshot,input,settings.config,signal);turn.imageAssetIds=images.ids;await this.persist(conversation);
+        const result=fixture?await this.fixture(snapshot,input,signal):await this.direct(conversation,snapshot,input,inferIntent(input,!!snapshot.project?.shots.length),settings.config,images,signal);
+        snapshot=result.snapshot;reply=result.reply;committed=result.committed;
       }
+      if(committed&&snapshot.project){turn.committedRevision??=snapshot.project.revision;turn.request.projectId=snapshot.project.id;this.activeProjectId=snapshot.project.id;const wasUnbound=!conversation.projectId;conversation.projectId=snapshot.project.id;if(wasUnbound)await this.options.execution?.projectCreated?.(snapshot.project.id,conversation);reply+=' 工程与对应候选运行验证回执已确认。';}
       if(!turn.imageAssetIds?.length&&/(?:看过|查看|分析|识别).*(?:图像|图片|截图|PNG)|视觉检查/.test(reply))reply='已依据文字、工程规范和运行诊断处理本轮；本轮未发送图片像素给模型。';
-      turn.status='succeeded';turn.updatedAt=new Date().toISOString();for(const m of conversation.messages)if(m.turnId===turn.id)m.status='succeeded';
-      conversation.messages.push(message('assistant',reply,turn.id,'succeeded',committed&&snapshot.project?[{label:'查看当前工程',projectId:snapshot.project.id,revision:snapshot.project.revision,frame:0}]:undefined));await this.persist(conversation);
-      if(originalProjectId!==conversation.projectId){const old={...structuredClone(conversation),projectId:originalProjectId};await this.persist(old);}return {conversation:structuredClone(conversation),snapshot};
-    }catch(error){turn.status=signal.aborted?'cancelled':'failed';turn.error=errorText(error);turn.updatedAt=new Date().toISOString();for(const m of conversation.messages)if(m.turnId===turn.id)m.status=turn.status;conversation.messages.push(message('assistant',(committed?`工程 v${turn.committedRevision} 已保存，`:'')+'本轮未完成：'+turn.error,turn.id,turn.status));await this.persist(conversation);if(originalProjectId!==conversation.projectId)await this.persist({...structuredClone(conversation),projectId:originalProjectId});throw error;}
-    finally{signal.removeEventListener('abort',onAbort);}
+      await this.options.execution?.assertComplete?.();
+      turn.status='succeeded';turn.updatedAt=new Date().toISOString();turn.phase='succeeded';for(const item of conversation.messages)if(item.turnId===turn.id)item.status='succeeded';
+      conversation.messages.push(message('assistant',reply,turn.id,'succeeded',committed&&snapshot.project?[{label:'查看当前工程',projectId:snapshot.project.id,revision:snapshot.project.revision,frame:0}]:undefined));await this.persist(conversation);await this.phase('succeeded',{committedRevision:turn.committedRevision,checkpoint:'complete'});return {conversation:structuredClone(conversation),snapshot};
+    }catch(error){
+      const receipt=await this.options.execution?.reconcile?.().catch(()=>undefined);if(receipt?.committedRevision!==undefined){turn.committedRevision=receipt.committedRevision;committed=true;}
+      turn.status=signal.aborted?'cancelled':'failed';turn.error=errorText(error);turn.updatedAt=new Date().toISOString();
+      const code=(error as {code?:string}).code;const status:AgentTaskStatus=signal.aborted?'cancelled':code==='CHILDREN_PENDING'?'blocked':code==='AGENT_NO_PROGRESS'?'stalled':code==='REVISION_CONFLICT'?'awaiting-rebase':committed?'paused':'failed';
+      await this.phase(status,{error:turn.error,committedRevision:turn.committedRevision,checkpoint:committed?'needs-validation':'failed'}).catch(()=>{});
+      for(const item of conversation.messages)if(item.turnId===turn.id)item.status=turn.status;
+      conversation.messages.push(message('assistant',(committed?`工程 v${turn.committedRevision} 已保存，`:'')+'本轮未完成：'+turn.error,turn.id,turn.status));await this.persist(conversation);throw error;
+    }
   }
-  private async preview(snapshot:StudioSnapshot,signal:AbortSignal):Promise<StudioSnapshot>{signal.throwIfAborted();snapshot=await this.backend.call('preview',{projectId:snapshot.project!.id,expectedRevision:snapshot.project!.revision});this.ownedTaskId=snapshot.task?.id;const owned=this.ownedTaskId;
-    while(snapshot.task?.status==='running'){await new Promise<void>((resolve,reject)=>{const abort=()=>{clearTimeout(timer);reject(signal.reason);};const timer=setTimeout(()=>{signal.removeEventListener('abort',abort);resolve();},80);signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort();});signal.throwIfAborted();snapshot=await this.backend.call('current',{projectId:snapshot.project!.id});if(snapshot.task?.id!==owned)throw new Error('预览任务被另一任务替换');}
-    signal.throwIfAborted();if(snapshot.task?.status==='failed'||snapshot.task?.status==='cancelled')throw new Error(snapshot.task.error??snapshot.task.message);await this.backend.call('inspect',{projectId:snapshot.project!.id,includeSource:false});return snapshot;
+  private async preview(snapshot:StudioSnapshot,signal:AbortSignal):Promise<StudioSnapshot>{
+    if(!snapshot.project)throw new Error('请先创建工程');await this.validate(snapshot,snapshot.project,[],signal);return snapshot;
   }
   private async direct(conversation:Conversation,snapshot:StudioSnapshot,input:ChatInput,requested:Intent|'auto',config:ProviderConfig,images:{content:ModelContent[];ids:string[]},signal:AbortSignal):Promise<{snapshot:StudioSnapshot;reply:string;committed:boolean}>{
-    const limit=config.contextMessageLimit??24,maxChars=config.contextCharLimit??90000;let remaining=Math.floor(maxChars*.55);const history:ModelMessage[]=[];
-    for(const m of [...conversation.messages].reverse()){if(history.length>=limit)break;const content=m.content.slice(0,Math.min(remaining,20000));if(!content)break;remaining-=content.length;history.unshift({role:m.role,content});}
-    const turns:ModelMessage[]=history;const receipts:Obj[]=[];const collected:unknown[]=[];
-    for(let round=0;round<4;round++){signal.throwIfAborted();const context={requestedIntent:requested,request:input.message,project:snapshot.project,selectedShotIds:snapshot.project?selectedShots(snapshot.project,input).map(s=>s.id):[],imageEvidence:{sentAssetIds:images.ids,pixelsSent:images.ids.length>0},receipts};const contextText=JSON.stringify(context);if(contextText.length>Math.floor(maxChars*.75))throw new Error('工程上下文超过模型设置上限，请提高上下文限制或缩小工程内容');
+    const limit=config.contextMessageLimit??24,maxChars=config.contextCharLimit??90000;let remaining=Math.floor(maxChars*.45);const turns:ModelMessage[]=[];
+    for(const item of [...conversation.messages].reverse()){if(turns.length>=limit)break;const content=item.content.slice(0,Math.min(remaining,20000));if(!content)break;remaining-=content.length;turns.unshift({role:item.role,content});}
+    const restored=await this.options.execution?.restoreAccepted?.(signal);if(restored?.snapshot)snapshot=restored.snapshot;
+    const receipts:Obj[]=(conversation.turns??[]).filter(turn=>turn!==this.turn&&turn.taskId&&turn.taskId===this.turn?.taskId).flatMap(turn=>turn.toolReceipts??[]).slice(-16),collected:unknown[]=[],accepted:AgentCandidatePayload[]=restored?.candidates??[];let previousAttempt='',repeated=0;const maxRounds=4;
+    for(let round=0;round<maxRounds;round++){
+      signal.throwIfAborted();await this.phase('planning',{checkpoint:'round-'+round});
+      const context={requestedIntent:requested,request:input.message,project:snapshot.project,selectedShotIds:snapshot.project?selectedShots(snapshot.project,input).map(shot=>shot.id):[],imageEvidence:{sentAssetIds:images.ids,pixelsSent:images.ids.length>0},receipts,remainingRounds:maxRounds-round};
+      const contextText=JSON.stringify(context);if(contextText.length>Math.floor(maxChars*.75))throw new Error('工程上下文超过模型设置上限，请提高上下文限制或缩小工程内容');
       if(images.content.length)for(const previous of turns)if(Array.isArray(previous.content))previous.content=previous.content.filter(part=>part.type==='text');
       turns.push({role:'user',content:images.content.length?[{type:'text',text:'当前上下文：'+contextText},...images.content]:'当前上下文：'+contextText});
-      const system=DIRECTOR+'\n'+packBriefContext(input.packId);const size=(m:ModelMessage)=>typeof m.content==='string'?m.content.length:m.content.reduce((total,part)=>total+(part.type==='text'?part.text.length:0),0);
-      let requestSize=system.length+turns.reduce((total,m)=>total+size(m),0);while(requestSize>maxChars&&turns.length>1)requestSize-=size(turns.shift()!);if(requestSize>maxChars)throw new Error('当前工程与导演提示超过上下文上限，请提高模型上下文限制');
-      const raw=await this.providers.complete(turns,system,signal,config.maxTokens,{provider:input.provider,model:input.model});turns.push({role:'assistant',content:raw});
-      try{const plan=parseModelJson(raw),actions=array(plan.actions??[],'actions');const combined={...plan,actions:[...collected,...actions]};const prepared=compileDirectorPlan(combined,snapshot,input,requested);
-        if(plan.done===true&&!prepared.inspect.length){
-          try{if(prepared.mutated){signal.throwIfAborted();const candidate=prepared.candidate!;snapshot=prepared.create?await this.backend.call('create',{project:candidate,sources:prepared.sources}):await this.backend.call('apply',{projectId:snapshot.project!.id,expectedRevision:snapshot.project!.revision,project:candidate,sources:prepared.sources});}
-            else if(prepared.preview&&snapshot.project)snapshot=await this.preview(snapshot,signal);
-            return {snapshot,reply:prepared.reply,committed:prepared.mutated};
-          }catch(error){const code=(error as {code?:string}).code,repairable=['REVISION_CONFLICT','REVISION_REQUIRED','VALIDATION_ERROR','INVALID_PROJECT'].includes(code??'')||/版本冲突/.test(errorText(error));
-            if(!repairable||round===3)throw Object.assign(error instanceof Error?error:new Error(errorText(error)),{commitFailure:true});
-            snapshot=await this.backend.call('current',snapshot.project?{projectId:snapshot.project.id}:{});collected.length=0;receipts.push({status:'error',code:code??'REVISION_CONFLICT',message:errorText(error),committed:false,currentRevision:snapshot.project?.revision});turns.push({role:'user',content:'后端事务拒绝了本轮计划，没有提交本轮修改；请依据最新工程重新合并：'+JSON.stringify(receipts.at(-1))});continue;
+      const system=DIRECTOR+'\n'+packBriefContext(input.packId),size=(item:ModelMessage)=>typeof item.content==='string'?item.content.length:item.content.reduce((total,part)=>total+(part.type==='text'?part.text.length:0),0);
+      let requestSize=system.length+turns.reduce((total,item)=>total+size(item),0);while(requestSize>maxChars&&turns.length>1)requestSize-=size(turns.shift()!);if(requestSize>maxChars)throw new Error('当前工程与导演提示超过上下文上限');
+      await this.reserve('modelCalls');const raw=await this.providers.complete(turns,system,signal,config.maxTokens,{provider:input.provider,model:input.model},input.sessionId);turns.push({role:'assistant',content:raw});
+      const signature=createHash('sha256').update(raw+'|'+snapshot.project?.revision+'|'+JSON.stringify(receipts.at(-1))).digest('hex');repeated=signature===previousAttempt?repeated+1:0;previousAttempt=signature;
+      if(repeated>=1)throw fail('AGENT_NO_PROGRESS','相同计划在相同工程版本上重复，未产生新进展；请缩小或调整请求');
+      try{
+        const plan=parseModelJson(raw);if(typeof plan.done!=='boolean')throw new Error('导演计划须提供布尔 done');const actions=array(plan.actions??[],'actions');
+        const delegated=actions.filter(raw=>externalTools.has(String(object(raw).tool)));
+        if(delegated.length){
+          if(!this.options.execution?.externalTool)throw new Error('当前会话未启用内置子代理');
+          if(delegated.length!==actions.length||collected.length)throw new Error('子代理工具与工程写计划必须分轮执行');
+          for(const rawAction of delegated){
+            signal.throwIfAborted();const action=object(rawAction);await this.reserve('toolCalls');await this.phase('executing');const result=await this.options.execution.externalTool(String(action.tool),object(action.arguments??{}),signal);const envelope=result&&typeof result==='object'?result as {receipt?:unknown;acceptedCandidate?:AgentCandidatePayload;snapshot?:StudioSnapshot}:undefined;
+            if(envelope?.acceptedCandidate){
+              const changedRevision=envelope.snapshot?.project?.revision!==undefined&&envelope.snapshot.project.revision!==snapshot.project?.revision;
+              if(changedRevision&&accepted.length){const refreshed=await this.options.execution.restoreAccepted?.(signal);if(!refreshed?.snapshot)throw fail('REVISION_CONFLICT','成员候选基线已变化，需要重新验证全部产物');accepted.splice(0,accepted.length,...refreshed.candidates);snapshot=refreshed.snapshot;}
+              else{accepted.push(envelope.acceptedCandidate);if(envelope.snapshot)snapshot=envelope.snapshot;}
+              if(changedRevision)collected.length=0;
+            }
+            const visible=envelope&&Object.hasOwn(envelope,'receipt')?envelope.receipt:result;const serialized=JSON.stringify(visible);const storedReceipt={status:'tool-result',tool:action.tool,result:serialized.length>24000?serialized.slice(0,24000)+' [TRUNCATED]':visible};receipts.push(storedReceipt);if(this.turn){this.turn.toolReceipts??=[];this.turn.toolReceipts.push(storedReceipt);await this.persist(conversation);}
           }
+          continue;
+        }
+        const prepared=compileDirectorPlan({...plan,actions:[...collected,...actions]},snapshot,input,requested);
+        if(plan.done&&!prepared.inspect.length){
+          if(accepted.length){if(!snapshot.project)throw new Error('成员候选必须属于已有工程');const merged=mergeAcceptedCandidates(snapshot.project,prepared.candidate??snapshot.project,prepared.sources,accepted);prepared.candidate=merged.project;prepared.sources=merged.sources;prepared.mutated=true;}
+          const requiresWork=['create','modify'].includes(requested)||['create','modify'].includes(prepared.intent);
+          const sameProject=prepared.candidate&&snapshot.project&&JSON.stringify(prepared.candidate)===JSON.stringify(snapshot.project);
+          if(requiresWork&&(!prepared.mutated||sameProject&&!prepared.sources.length))throw fail('TASK_NOT_SATISFIED','修改请求没有产生可验证的修改，不能标记完成');
+          if(prepared.mutated){
+            if(prepared.create&&input.projectId)throw fail('SESSION_SCOPE_VIOLATION','当前会话已绑定工程；请在新的未绑定会话中创建另一影片');
+            const receipt=await this.validate(snapshot,prepared.candidate!,prepared.sources,signal);
+            const payload={expectedRevision:snapshot.project?.revision??null,project:prepared.candidate!,sources:prepared.sources,validationId:receipt.id,...(!prepared.create?{projectId:snapshot.project!.id}:{})};
+            try{snapshot=await this.mutate(prepared.create?'create':'apply',payload,input,signal);}
+            catch(error){if((error as {code?:string}).code==='REVISION_CONFLICT'&&round<maxRounds-1){snapshot=await this.backend.call('current',{projectId:snapshot.project?.id});collected.length=0;
+              if(accepted.length){try{const refreshed=await this.options.execution?.restoreAccepted?.(signal);if(!refreshed?.snapshot)throw fail('REVISION_CONFLICT','成员候选需要重新验证后才能合并');accepted.splice(0,accepted.length,...refreshed.candidates);snapshot=refreshed.snapshot;}catch(failure){throw Object.assign(failure instanceof Error?failure:new Error(errorText(failure)),{commitFailure:true});}}
+              receipts.push({status:'error',code:'REVISION_CONFLICT',committed:false,currentRevision:snapshot.project?.revision});turns.push({role:'user',content:'后端事务拒绝本轮计划，请依据最新工程重新合并'});continue;}throw Object.assign(error instanceof Error?error:new Error(errorText(error)),{commitFailure:true});}
+          }else if(prepared.preview&&snapshot.project)snapshot=await this.preview(snapshot,signal);
+          return {snapshot,reply:prepared.reply,committed:prepared.mutated};
         }
         collected.push(...actions.filter(raw=>{const action=object(raw);return action.tool!=='video_inspect'&&!(action.tool==='video_project'&&object(action.arguments??{}).action!=='create');}));
-        for(const inspect of prepared.inspect){const result=inspect.kind==='project'?{project:snapshot.project}:await this.backend.call('inspect',{projectId:snapshot.project?.id,shotId:inspect.shotId,includeSource:inspect.includeSource});const serialized=JSON.stringify(result);receipts.push({status:'read',result:serialized.length>45000?serialized.slice(0,45000)+' [TRUNCATED]':result});}
-        turns.push({role:'user',content:'工具规划与读取回执：'+JSON.stringify({status:'planned-not-committed',receipts})+'。读取已实际执行，修改仍未提交；请根据回执回答或完成计划，不要重复尚未提交的修改动作。'});
-      }catch(error){if(round===3||(error as {commitFailure?:boolean}).commitFailure)throw error;receipts.push({status:'error',message:errorText(error),committed:false});turns.push({role:'user',content:'计划未提交，格式或工具校验错误：'+errorText(error)+'。返回修复后的完整计划；不要重复之前尚未提交的动作。'});collected.length=0;}
+        for(const inspect of prepared.inspect){await this.reserve('toolCalls');const result=inspect.kind==='project'?{project:snapshot.project}:await this.backend.call('inspect',{projectId:snapshot.project?.id,shotId:inspect.shotId,includeSource:inspect.includeSource});const serialized=JSON.stringify(result);receipts.push({status:'read',result:serialized.length>45000?serialized.slice(0,45000)+' [TRUNCATED]':result});}
+        turns.push({role:'user',content:'读取已实际执行，修改尚未提交。依据真实回执完成计划，不重复未提交动作。'});
+      }catch(error){if(round===maxRounds-1||(error as {commitFailure?:boolean}).commitFailure)throw error;receipts.push({status:'error',message:errorText(error),committed:false});turns.push({role:'user',content:'计划未提交，格式或工具校验错误，请修复完整计划：'+errorText(error)});collected.length=0;}
     }
-    throw new Error('导演计划超过4轮上限，请缩小请求后重试');
+    throw fail('AGENT_ROUND_LIMIT','导演计划超过4轮上限，请缩小请求后重试');
   }
   private async fixture(snapshot:StudioSnapshot,input:ChatInput,signal:AbortSignal){
-    if(input.model!==DEMO_MODEL)throw new Error('fixture模型名称无效');signal.throwIfAborted();if(!snapshot.project||!snapshot.project.shots.length){const candidate=snapshot.project?structuredClone(snapshot.project):createProject(shortTopic(input.message),shortTopic(input.message));candidate.topic=shortTopic(input.message);const shots=demoStoryboard(candidate);candidate.shots=shots;candidate.shotOrder=shots.map(s=>s.id);candidate.revision=snapshot.project?.revision??0;const sources=shots.map((shot,index)=>({shotId:shot.id,source:demoSceneSource(index)}));snapshot=await this.backend.call(snapshot.project?'apply':'create',snapshot.project?{projectId:candidate.id,expectedRevision:candidate.revision,project:candidate,sources}:{project:candidate,sources});return {snapshot,reply:'测试 fixture 已提交可编辑场景；该路径不进入正常供应商目录。',mutated:true};}
-    const shots=selectedShots(snapshot.project,input),patches=shots.map(shot=>({id:shot.id,patch:demoPatch(shot,input.message,snapshot.project!.target.fps.num/snapshot.project!.target.fps.den)})).filter(x=>Object.keys(x.patch).length);if(patches.length)snapshot=await this.backend.call('apply',{projectId:snapshot.project.id,expectedRevision:snapshot.project.revision,shotPatches:patches});return {snapshot,reply:'测试 fixture 局部修改完成。',mutated:patches.length>0};
+    if(input.model!==DEMO_MODEL)throw new Error('fixture模型名称无效');const candidate=snapshot.project?structuredClone(snapshot.project):createProject(shortTopic(input.message),shortTopic(input.message));let sources:{shotId:string;source:SceneSource}[]=[];
+    if(!candidate.shots.length||!snapshot.project){candidate.shots=demoStoryboard(candidate);candidate.shotOrder=candidate.shots.map(shot=>shot.id);sources=candidate.shots.map((shot,index)=>({shotId:shot.id,source:demoSceneSource(index)}));}
+    else for(const shot of selectedShots(candidate,input))Object.assign(shot,demoPatch(shot,input.message,candidate.target.fps.num/candidate.target.fps.den));
+    const receipt=await this.validate(snapshot,candidate,sources,signal);snapshot=await this.mutate(snapshot.project?'apply':'create',{project:candidate,sources,expectedRevision:snapshot.project?.revision??null,validationId:receipt.id,...(snapshot.project?{projectId:snapshot.project.id}:{})},input,signal);
+    return {snapshot,reply:'测试 fixture 已验证并提交可编辑场景；该路径不进入正常供应商目录。',committed:true};
   }
 }
 

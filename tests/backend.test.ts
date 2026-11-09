@@ -82,7 +82,7 @@ test('task starts with durable journal and cancellation retains an owned task re
   try{
     const first=await f.backend.call<StudioSnapshot>('create',{title:'任务取消'}),running=await f.backend.call<StudioSnapshot>('preview',{projectId:first.project!.id});
     assert.equal(running.task!.status,'running');const path=running.task!.logPath!;assert.equal(JSON.parse(await readFile(path,'utf8')).status,'running');
-    await f.backend.call('cancel',{projectId:first.project!.id});
+    await f.backend.call('cancel',{projectId:first.project!.id,expectedTaskId:running.task!.id});
     for(let i=0;i<20;i++){const current=await f.backend.call<StudioSnapshot>('current',{projectId:first.project!.id});if(current.task!.status==='cancelled')break;await new Promise(resolve=>setTimeout(resolve,5));}
     await f.backend.dispose();const record=JSON.parse(await readFile(path,'utf8'));assert.equal(record.status,'cancelled');assert.ok(record.finishedAt);
   }finally{VideoRenderer.prototype.check=previousCheck;await f.close();}
@@ -212,7 +212,7 @@ test('missing selected directory on restart leaves the project picker usable',as
   }finally{await f.close();}
 });
 
-test('recorded generation task commits multiple scenes as one undoable change and retries locally',async()=>{
+test('recorded generation is one undoable change and completion cannot be retried after undo',async()=>{
   const dataDirectory=await mkdtemp(join(tmpdir(),'yingliu-generate-history-'));let calls=0;
   const localProvider:ProviderHost={listProviders:()=>[{id:'fixture',name:'offline test fixture'}],listModels:async()=>[{id:'fixture-source',name:'fixture-source'}],async *stream(){calls++;yield {type:'text-delta',text:JSON.stringify({...defaultSceneSource(),html:'<p>fixture generation '+calls+'</p>',shotPatch:{narration:'fixture旁白'}})};yield {type:'finish',reason:{kind:'stop'}};}};
   const backend=new AppBackend({dataDirectory,providers:localProvider,credentials:memoryCredentials()});
@@ -221,8 +221,8 @@ test('recorded generation task commits multiple scenes as one undoable change an
     await backend.call('generate',{projectId:id,expectedRevision:0,kind:'scenes',provider:'fixture',model:'fixture-source'});const generated=await finished(backend,id);assert.equal(generated.task!.status,'complete');assert.equal(generated.project!.revision,3);assert.equal(calls,3);
     const history=await backend.call<{entries:unknown[]}>('history',{projectId:id});assert.equal(history.entries.length,2);
     const undone=await backend.call<StudioSnapshot>('undo',{projectId:id,expectedRevision:3});assert.equal(undone.project!.revision,4);for(const shot of undone.project!.shots)assert.deepEqual(await backend.call('source',{projectId:id,shotId:shot.id}),defaultSceneSource());
-    await backend.call('retry',{projectId:id,taskId:generated.task!.id,expectedRevision:4});const retried=await finished(backend,id);assert.equal(retried.task!.status,'complete');assert.equal(retried.project!.revision,7);assert.equal(calls,6);
-    const tasks=await backend.call<{tasks:any[]}>('tasks',{projectId:id});assert.equal(tasks.tasks.length,2);assert.ok(tasks.tasks.some(task=>task.retryOf===generated.task!.id));assert.equal((await backend.call<{entries:unknown[]}>('history',{projectId:id})).entries.length,2);
+    const retry=await backend.route('retry',{projectId:id,taskId:generated.task!.id,expectedRevision:4});assert.equal(retry.ok,false);if(!retry.ok)assert.equal(retry.error.code,'TASK_ALREADY_COMPLETED');assert.equal(calls,3);assert.equal((await backend.call<StudioSnapshot>('current',{projectId:id})).project!.revision,4);
+    const tasks=await backend.call<{tasks:any[]}>('tasks',{projectId:id});assert.equal(tasks.tasks.length,1);assert.equal(tasks.tasks[0].retryable,false);assert.equal((await backend.call<{entries:unknown[]}>('history',{projectId:id})).entries.length,2);
   }finally{await backend.dispose();await rm(dataDirectory,{recursive:true,force:true});}
 });
 

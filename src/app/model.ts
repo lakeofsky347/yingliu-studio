@@ -97,9 +97,9 @@ export class ProviderManager {
     stream:options=>this.stream(options),
   };}
   /** Resolve a role or explicit route once per request; no credentials enter returned metadata. */
-  async complete(messages:ModelMessage[],system:string,signal:AbortSignal,maxTokens?:number,selection:ModelSelection='director'):Promise<string>{
+  async complete(messages:ModelMessage[],system:string,signal:AbortSignal,maxTokens?:number,selection:ModelSelection='director',sessionId='app-director'):Promise<string>{
     await this.initialize();const resolved=await this.registry.resolve(selection);let result='',stopped=false;
-    for await(const chunk of this.stream({provider:resolved.connection.id,model:resolved.model.model,messages,system,maxTokens:maxTokens??Number(resolved.model.parameters.maxTokens??DEFAULT.maxTokens),sessionId:'app-director',signal})){
+    for await(const chunk of this.stream({provider:resolved.connection.id,model:resolved.model.model,messages,system,maxTokens:maxTokens??Number(resolved.model.parameters.maxTokens??DEFAULT.maxTokens),sessionId,signal})){
       if(chunk.type==='text-delta')result+=chunk.text??'';
       if(chunk.type==='finish'){if(chunk.reason?.kind!=='stop')throw new Error(chunk.reason?.failure?.message??'模型输出不完整，请缩小修改范围');stopped=true;}
     }

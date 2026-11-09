@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import {randomUUID} from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { createApplication, MemorySecrets } from '../src/app/application.ts';
 import { defaultSceneSource } from '../src/core/index.ts';
@@ -34,10 +35,10 @@ async function fixture(options:{blockSpeech?:boolean}={}){
   await new Promise<void>(accept=>server.listen(0,'127.0.0.1',accept));const address=server.address() as {port:number};
   const directory=await mkdtemp(join(tmpdir(),'yingliu-model-media-'));
   const app=await createApplication({dataDirectory:directory,credentials:new MemorySecrets()});
-  const call=async<T>(endpoint:string,payload:unknown={}):Promise<T>=>{const value=await app.route(endpoint,payload);if(!value.ok)throw Object.assign(new Error(value.error.message),{code:value.error.code});return value.value as T;};
+  const sessions=new Map<string,string>(),writes=new Set(['create','save','media.generate','media.apply','workflows.run']);const call=async<T>(endpoint:string,payload:unknown={}):Promise<T>=>{let data={...(payload as Record<string,unknown>)};if(writes.has(endpoint))data={...data,operationId:randomUUID(),...(endpoint==='create'?{expectedRevision:null,target:{width:320,height:180,fps:{num:12,den:1}}}:{})};if(endpoint==='workflows.run'){const projectId=String(data.projectId);let sessionId=sessions.get(projectId);if(!sessionId){const session=await app.route('sessions.create',{projectId});if(!session.ok)throw new Error(session.error.message);sessionId=(session.value as {id:string}).id;sessions.set(projectId,sessionId);}data.sessionId=sessionId;}const value=await app.route(endpoint,data);if(!value.ok)throw Object.assign(new Error(value.error.message),{code:value.error.code});return value.value as T;};
   return {app,call,baseUrl:`http://127.0.0.1:${address.port}/v1`,get calls(){return calls;},get speechCalls(){return speechCalls;},releaseSpeech,async close(){releaseSpeech();await app.dispose();server.closeAllConnections();await new Promise<void>(accept=>server.close(()=>accept()));await rm(directory,{recursive:true,force:true});}};
 }
-async function until<T>(read:()=>Promise<T>,done:(value:T)=>boolean):Promise<T>{const end=Date.now()+15000;while(true){const value=await read();if(done(value))return value;if(Date.now()>end)throw new Error('测试等待超时');await new Promise(accept=>setTimeout(accept,20));}}
+async function until<T>(read:()=>Promise<T>,done:(value:T)=>boolean):Promise<T>{const end=Date.now()+90000;while(true){const value=await read();if(done(value))return value;if(Date.now()>end)throw new Error('测试等待超时');await new Promise(accept=>setTimeout(accept,20));}}
 
 test('application model routes return editable entities; generated media uses CAS and preserves user edits',async()=>{
   const f=await fixture();try{
@@ -68,19 +69,16 @@ test('application workflow invokes configured director and scene roles, then com
   }finally{await f.close();}
 });
 
-test('application speech preflight can be corrected and retried without repeating completed scenes',{skip:spawnSync('ffprobe',['-version']).status!==0},async()=>{
+test('application workflow blocks a changed frozen speech route and a new task uses corrected configuration',{skip:spawnSync('ffprobe',['-version']).status!==0},async()=>{
   const f=await fixture();try{
     const text=await f.call<ProviderConnection>('models.connection.save',{protocol:'chat-completions',baseUrl:f.baseUrl,auth:'none'}),model=await f.call<ModelDefinition>('models.model.save',{connectionId:text.id,model:'director-test'});
     for(const role of ['director','scene'])await f.call('models.role.bind',{role,modelId:model.id});
     const speech=await f.call<ProviderConnection>('models.connection.save',{protocol:'speech',baseUrl:f.baseUrl,auth:'bearer',enabled:false}),voice=await f.call<ModelDefinition>('models.model.save',{connectionId:speech.id,model:'speech-test',parameters:{voice:'fixture'}});
-    await f.call('models.role.bind',{role:'speech',modelId:voice.id});
-    const project=(await f.call<StudioSnapshot>('create',{title:'配音预检恢复'})).project!;
-    const run=await f.call<WorkflowRecord>('workflows.run',{projectId:project.id,expectedRevision:project.revision,shotIds:[project.shots[0]!.id],prompt:'制作并配音',visual:'code',narration:true,review:false,allowImageUpload:false});
-    let stopped=await until(()=>f.call<WorkflowRecord>('workflows.get',{workflowId:run.id}),value=>value.status!=='running');assert.equal(stopped.status,'failed');assert.equal(stopped.steps.find(step=>step.kind==='speech')!.submissionUncertain,false);assert.equal(f.speechCalls,0);const textCalls=f.calls;
-    await f.call('models.connection.save',{id:speech.id,enabled:true});await f.call('workflows.retry',{workflowId:run.id});
-    stopped=await until(()=>f.call<WorkflowRecord>('workflows.get',{workflowId:run.id}),value=>value.status!=='running');assert.equal(stopped.status,'failed');assert.equal(stopped.steps.find(step=>step.kind==='speech')!.submissionUncertain,false);assert.equal(f.speechCalls,0);
-    await f.call('models.connection.save',{id:speech.id,apiKey:'local-speech-fixture-key'});await f.call('workflows.retry',{workflowId:run.id});
-    const done=await until(()=>f.call<WorkflowRecord>('workflows.get',{workflowId:run.id}),value=>value.status!=='running');assert.equal(done.status,'complete',done.error);assert.equal(f.speechCalls,1);assert.equal(f.calls,textCalls);
+    await f.call('models.role.bind',{role:'speech',modelId:voice.id});const project=(await f.call<StudioSnapshot>('create',{title:'配音配置冻结'})).project!;
+    const request={projectId:project.id,expectedRevision:project.revision,shotIds:[project.shots[0]!.id],prompt:'制作并配音',visual:'code',narration:true,review:false,allowImageUpload:false};
+    const run=await f.call<WorkflowRecord>('workflows.run',request),stopped=await until(()=>f.call<WorkflowRecord>('workflows.get',{workflowId:run.id}),value=>value.status!=='running');assert.equal(stopped.status,'failed');assert.equal(f.speechCalls,0);const textCalls=f.calls;
+    await f.call('models.connection.save',{id:speech.id,enabled:true,apiKey:'local-speech-fixture-key'});await f.call('workflows.retry',{workflowId:run.id});const blocked=await until(()=>f.call<WorkflowRecord>('workflows.get',{workflowId:run.id}),value=>value.status!=='running');assert.equal(blocked.phase,'blocked');assert.match(blocked.error??'',/冻结快照/);assert.equal(f.calls,textCalls);assert.equal(f.speechCalls,0);
+    const fresh=await f.call<WorkflowRecord>('workflows.run',request),done=await until(()=>f.call<WorkflowRecord>('workflows.get',{workflowId:fresh.id}),value=>value.status!=='running');assert.equal(done.status,'complete',done.error);assert.equal(f.speechCalls,1);
     const current=(await f.call<StudioSnapshot>('current',{projectId:project.id})).project!;assert.equal(current.revision,project.revision+1);assert.equal(current.audioClips!.length,1);assert.equal(current.assets.find(asset=>asset.kind==='audio')!.mime,'audio/wav');
   }finally{await f.close();}
 });

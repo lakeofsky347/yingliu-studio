@@ -53,7 +53,7 @@ if(ownsApplication)void app.whenReady().then(async()=>{
   ipcMain.handle('yingliu:import-project',async event=>{
     if(!trusted(event))throw new Error('此窗口无法导入工程');
     const result=await dialog.showOpenDialog(window,{title:'导入映流工程包',properties:['openFile'],filters:[{name:'映流工程包',extensions:['yingliu']}]});
-    return result.canceled?null:application.route('app.importProject',{path:result.filePaths[0]});
+    return result.canceled?null:application.route('app.importProject',{path:result.filePaths[0],operationId:randomUUID(),expectedRevision:null});
   });
   const closeWaiters=new Map<string,(result:{ok:boolean;message?:string})=>void>();
   ipcMain.handle('yingliu:close-result',(event,id:string,result:{ok:boolean;message?:string})=>{if(!trusted(event))throw new Error('此窗口不能确认保存');closeWaiters.get(id)?.({ok:result?.ok===true,message:typeof result?.message==='string'?result.message:undefined});});

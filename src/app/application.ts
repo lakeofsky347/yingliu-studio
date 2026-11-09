@@ -1,7 +1,9 @@
 import { resolve } from 'node:path';
 import { AppBackend } from './backend.ts';
 import { ProviderManager } from './model.ts';
-import { ConversationService } from './conversation.ts';
+import { ConversationSessions } from './conversation-sessions.ts';
+import { AgentCoordinator } from './agent-coordinator.ts';
+import { agentError } from '../agent/repository.ts';
 import type { RpcResult } from '../shared/types.ts';
 import type { ChatInput, SecretStore } from './contracts.ts';
 import { foundationPacks } from './packs.ts';
@@ -17,6 +19,18 @@ export const ENDPOINTS=new Set(['catalog','current','create','open','save','impo
 for(const endpoint of ['models.list','models.connection.save','models.connection.remove','models.model.save','models.model.remove','models.role.bind','models.check','media.generate','media.list','media.get','media.retry','media.pause','media.cancel','media.apply','video.clip.save','video.clip.remove','video.clip.extract'])ENDPOINTS.add(endpoint);
 for(const endpoint of ['workflows.run','workflows.list','workflows.get','workflows.retry','workflows.pause','workflows.apply'])ENDPOINTS.add(endpoint);
 for(const endpoint of ['styles.list','styles.save','styles.delete'])ENDPOINTS.add(endpoint);
+for(const endpoint of ['sessions.create','sessions.list','sessions.get','chat.status','agent.tasks','agent.task.get','agent.task.pause','agent.task.resume','agent.task.retry','agent.task.cancel','agent.candidate.get','candidate.validate','operation.get','operation.receipt','operation.intent'])ENDPOINTS.add(endpoint);
+const projectWrites=new Set(['create','save','import','saveSource','restoreSource','generate','apply','audio','undo','redo','rename','duplicate','archive','retry','video.clip.save','video.clip.remove','video.clip.extract','app.importProject','media.apply','workflows.apply']);
+const protocolWrites=new Set([...projectWrites,'chat.send','media.generate','workflows.run']);
+function protocol(endpoint:string,data:Record<string,unknown>){
+  if(data.execution!==undefined||data.operation!==undefined&&typeof data.operation!=='string'||data.leaseOwner!==undefined)throw agentError('RUNTIME_IDENTITY_FORBIDDEN','执行身份只能由应用创建，调用方不能提供内部 operation、execution 或 leaseOwner');
+  if(!protocolWrites.has(endpoint))return data;
+  if(typeof data.operationId!=='string'||!/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,199}$/.test(data.operationId))throw agentError('PROTOCOL_UPGRADE_REQUIRED','写操作必须包含稳定的 operationId；请升级调用方并在重试时复用原 ID');
+  const creation=endpoint==='create'||endpoint==='app.importProject'||endpoint==='chat.send'&&!data.projectId;
+  if(creation?data.expectedRevision!==null:!Number.isSafeInteger(data.expectedRevision)||Number(data.expectedRevision)<0)throw agentError('PROTOCOL_UPGRADE_REQUIRED',creation?'新建操作必须显式提供 expectedRevision:null':'修改工程必须提供读取所得的 expectedRevision；请先读取工程，禁止使用隐式最新版本');
+  if(['chat.send','workflows.run'].includes(endpoint)&&(typeof data.sessionId!=='string'||!data.sessionId.trim()))throw agentError('PROTOCOL_UPGRADE_REQUIRED','智能体请求必须提供由 sessions.create 创建的 sessionId');
+  return data;
+}
 export class MemorySecrets implements SecretStore {
   private values=new Map<string,string>();
   async get(ref:string){return this.values.get(ref);}
@@ -27,38 +41,49 @@ export async function createApplication(options:{dataDirectory:string;credential
   const dataDirectory=resolve(options.dataDirectory);
   const providers=new ProviderManager(dataDirectory,options.credentials);await providers.initialize();
   const backend=new AppBackend({...options,dataDirectory,providers:providers.host()});
-  const conversation=new ConversationService(backend,providers,dataDirectory);
   await backend.call('catalog');
   const media=new MediaTaskService(dataDirectory,providers.registry,backend.mediaPort());
   await media.recover();
   const workflowPort:WorkflowPort={
+    configuration:async request=>{
+      const roles:ModelRole[]=['director',request.visual==='code'?'scene':request.visual];if(request.review)roles.push('vision');if(request.narration)roles.push('speech');
+      return Promise.all([...new Set(roles)].map(async role=>{
+        if(role==='speech'&&!providers.registry.snapshot().roles.some(binding=>binding.role==='speech')){const snapshot=await backend.call('current',{projectId:request.projectId});const {apiKey:_key,...settings}=snapshot.tts??{};return {role,local:settings};}
+        const state=providers.registry.snapshot(),definition=role==='director'&&request.textRoute?state.models.find(model=>model.connectionId===request.textRoute!.provider&&model.model===request.textRoute!.model):state.models.find(model=>model.id===state.roles.find(binding=>binding.role===role)?.modelId),selected=state.connections.find(connection=>connection.id===definition?.connectionId);
+        if(!definition||!selected)return {role,missing:true};const {credentialRef:_reference,...connection}=selected;return {role,connection,model:definition};
+      }));
+    },
     snapshot:id=>backend.call('current',{projectId:id}),source:(id,shotId)=>backend.call('source',{projectId:id,shotId}),
-    commit:(id,expectedRevision,project,sources,label)=>backend.call('apply',{projectId:id,expectedRevision,project,sources:Object.entries(sources).map(([shotId,source])=>({shotId,source})),label}),
+    commit:(id,expectedRevision,project,sources,label,operation)=>backend.call('apply',{projectId:id,expectedRevision,project,sources:Object.entries(sources).map(([shotId,source])=>({shotId,source})),label,operation,validationId:operation?.validationId}),
+    validate:(id,candidate,signal)=>backend.validateCandidate(id,candidate,signal),
+    operationReceipt:(projectId,operationId)=>backend.operationReceipt(projectId,operationId),
     stageMedia:(id,task,files,signal)=>backend.stageWorkflowMedia(id,task,files,signal),
     capture:(id,frame,signal,candidate)=>backend.workflowCapture(id,frame,signal,candidate),
-    text:async(role,prompt,signal,_request,images)=>providers.complete([{role:'user',content:images?.length?[{type:'text',text:prompt},...images.map(image=>({type:'image_url' as const,image_url:{url:`data:${image.mime};base64,${Buffer.from(image.bytes).toString('base64')}`}}))]:prompt}],'你是视频制作团队的'+role+'。只依据提供的工程和实际图像执行任务。',signal,undefined,role),
-    voice:async(id,shotId,text,signal)=>{
-      const state=providers.registry.snapshot();if(!state.roles.some(binding=>binding.role==='speech'))return backend.workflowVoice(id,shotId,text,signal);
+    text:async(role,prompt,signal,request,images)=>providers.complete([{role:'user',content:images?.length?[{type:'text',text:prompt},...images.map(image=>({type:'image_url' as const,image_url:{url:`data:${image.mime};base64,${Buffer.from(image.bytes).toString('base64')}`}}))]:prompt}],'你是视频制作团队的'+role+'。只依据提供的工程和实际图像执行任务。',signal,undefined,role==='director'&&request.textRoute?request.textRoute:role,request.sessionId),
+    voice:async(id,shotId,text,signal,selection)=>{
+      const state=providers.registry.snapshot();if(!selection&&!state.roles.some(binding=>binding.role==='speech'))return backend.workflowVoice(id,shotId,text,signal);
       let release:(()=>void)|undefined;
       try{
-        const {selected,key}=await (async()=>{const selected=await providers.registry.resolve('speech');release=providers.registry.acquire(selected.connection.id,selected.model.id);const key=await providers.registry.credential(selected.connection);return {selected,key};})().catch(error=>{throw Object.assign(error instanceof Error?error:new Error(String(error)),{submissionUncertain:false});});
+        const {selected,key}=await (async()=>{const selected=await providers.registry.resolve(selection??'speech');release=providers.registry.acquire(selected.connection.id,selected.model.id);const key=await providers.registry.credential(selected.connection);return {selected,key};})().catch(error=>{throw Object.assign(error instanceof Error?error:new Error(String(error)),{submissionUncertain:false});});
         return await backend.workflowVoice(id,shotId,text,signal,{endpoint:selected.connection.baseUrl,model:selected.model.model,voice:String(selected.model.parameters.voice??'alloy'),speed:Number(selected.model.parameters.speed??1),enabled:true,requestTimeoutMs:selected.connection.requestTimeoutMs,...(key?{apiKey:key}:{})});
       }finally{release?.();}
     },
   };
+  const agents=new AgentCoordinator({dataDirectory,backend,providers,media,voice:workflowPort.voice});
+  const conversation=new ConversationSessions({backend,providers,dataDirectory,repositoryFor:agents.repositoryFor,externalTool:agents.externalTool});
   const workflows=new WorkflowService(dataDirectory,media,workflowPort);
   const requests=new Set<Promise<RpcResult>>();let stopping=false,disposal:Promise<void>|undefined;
   async function dispatch(endpoint:string,payload:unknown={}):Promise<RpcResult>{
     try{
       if(!ENDPOINTS.has(endpoint))throw new Error('不支持此应用操作');
-      const data=payload&&typeof payload==='object'&&!Array.isArray(payload)?payload as Record<string,unknown>:{};
+      const data=protocol(endpoint,payload&&typeof payload==='object'&&!Array.isArray(payload)?payload as Record<string,unknown>:{});
       let value:unknown;
       switch(endpoint){
         case 'archive':{
           if(data.archived!==false){const snapshot=await backend.call('current',{projectId:data.projectId});const id=snapshot.project?.id;if(id&&((await workflows.list(id)).some(item=>item.status==='running')||(await media.list(id)).some(item=>item.observation==='active'&&!['ready','complete','failed','cancelled'].includes(item.phase))))throw new Error('工程仍有媒体或协作任务，请先停止本地等待再归档');}
-          return backend.route(endpoint,payload);
+          return backend.route(endpoint,data);
         }
-        case 'workflows.run':value=await workflows.run(data as unknown as WorkflowRequest);break;
+        case 'workflows.run':{const repository=await agents.repositoryFor(String(data.projectId)),session=await repository.getSession(String(data.sessionId));if(session.kind!=='root')throw agentError('ROOT_SESSION_REQUIRED','协作制作必须由真实根会话发起');value=await workflows.run(data as unknown as WorkflowRequest);break;}
         case 'workflows.list':value={workflows:await workflows.list(typeof data.projectId==='string'?data.projectId:undefined)};break;
         case 'workflows.get':value=await workflows.get(String(data.workflowId));break;
         case 'workflows.retry':value=await workflows.retry(String(data.workflowId));break;
@@ -71,7 +96,7 @@ export async function createApplication(options:{dataDirectory:string;credential
         case 'models.model.remove':await providers.registry.removeModel(String(data.id));value=await providers.registry.list();break;
         case 'models.role.bind':await providers.registry.bindRole(data.role as ModelRole,typeof data.modelId==='string'?data.modelId:null);value=await providers.registry.list();break;
         case 'models.check':value=await providers.check(typeof data.connectionId==='string'?data.connectionId:undefined);break;
-        case 'media.generate':value=await media.generate(data as unknown as MediaRequest);break;
+        case 'media.generate':value=await media.generate({...data,clientRequestId:data.operationId} as unknown as MediaRequest);break;
         case 'media.list':value={tasks:await media.list(typeof data.projectId==='string'?data.projectId:undefined)};break;
         case 'media.get':value=await media.get(String(data.taskId));break;
         case 'media.retry':value=await media.retry(String(data.taskId));break;
@@ -85,10 +110,24 @@ export async function createApplication(options:{dataDirectory:string;credential
         case 'providers.get':value=await providers.settings();break;
         case 'providers.save':value=await providers.save(data);await backend.call('catalog');break;
         case 'providers.check':value=await providers.check();break;
-        case 'chat.history':value=await conversation.history(typeof data.projectId==='string'?data.projectId:undefined);break;
+        case 'sessions.create':value=await conversation.create(data);break;
+        case 'sessions.list':value={sessions:await conversation.list(data)};break;
+        case 'sessions.get':case 'chat.status':value=await conversation.status(data as unknown as {sessionId:string;projectId?:string});break;
+        case 'agent.tasks':value=await agents.tasks(typeof data.projectId==='string'?data.projectId:undefined,typeof data.sessionId==='string'?data.sessionId:undefined);break;
+        case 'agent.task.get':{const result=await agents.tasks(typeof data.projectId==='string'?data.projectId:undefined,String(data.sessionId));value=result.tasks.find(task=>task.id===data.taskId);if(!value)throw agentError('TASK_NOT_FOUND','任务不属于此会话');break;}
+        case 'agent.task.pause':case 'agent.task.resume':case 'agent.task.retry':case 'agent.task.cancel':{
+          if(typeof data.sessionId!=='string'||typeof data.taskId!=='string'||!Number.isSafeInteger(data.generation)||typeof data.operationId!=='string')throw agentError('PROTOCOL_UPGRADE_REQUIRED','任务控制需要 sessionId、taskId、generation 和 operationId');
+          const repository=await agents.repositoryFor(typeof data.projectId==='string'?data.projectId:undefined),task=await repository.getTask(data.taskId);
+          value=task.parentTaskId?await agents.control(endpoint.split('.').at(-1)!,data):await conversation.control(endpoint.split('.').at(-1)! as 'pause'|'resume'|'retry'|'cancel',data as unknown as {projectId?:string;sessionId:string;taskId:string;generation:number;operationId:string});break;
+        }
+        case 'agent.candidate.get':{
+          const repository=await agents.repositoryFor(typeof data.projectId==='string'?data.projectId:undefined),candidate=await repository.getCandidate(String(data.candidateId)),task=await repository.getTask(candidate.taskId),root=await repository.getTask(task.rootTaskId);
+          if(root.sessionId!==data.sessionId)throw agentError('SCOPE_DENIED','产物不属于此根会话');value={id:candidate.id,taskId:candidate.taskId,hash:candidate.hash,status:candidate.status,summary:candidate.summary,validation:candidate.validationId?await repository.getValidation(candidate.validationId):undefined};break;
+        }
+        case 'chat.history':value=await conversation.history(data as unknown as {sessionId:string;projectId?:string});break;
         case 'chat.send':value=await conversation.send(data as unknown as ChatInput);break;
-        case 'chat.cancel':value=await conversation.cancel();break;
-        default:return backend.route(endpoint,payload);
+        case 'chat.cancel':value=await conversation.cancel(data as unknown as {sessionId:string;projectId?:string;taskId:string;generation:number});break;
+        default:return backend.route(endpoint,data);
       }
       return {ok:true,value};
     }catch(error){return {ok:false,error:{code:typeof (error as {code?:unknown})?.code==='string'?(error as {code:string}).code:'APP_ERROR',message:error instanceof Error?error.message:'操作失败'}};}
@@ -97,6 +136,6 @@ export async function createApplication(options:{dataDirectory:string;credential
     if(stopping)return Promise.resolve({ok:false,error:{code:'APP_SHUTTING_DOWN',message:'应用正在关闭，请重新打开后继续'}});
     const request=dispatch(endpoint,payload);requests.add(request);void request.finally(()=>requests.delete(request));return request;
   }
-  return {backend,providers,conversation,media,workflows,route,dispose(){return disposal??=(async()=>{stopping=true;await conversation.shutdown();await workflows.dispose();await media.dispose();await Promise.allSettled([...requests]);await backend.dispose();})();}};
+  return {backend,providers,conversation,agents,media,workflows,route,dispose(){return disposal??=(async()=>{stopping=true;await conversation.shutdown();await workflows.dispose();await media.dispose();await Promise.allSettled([...requests]);await agents.dispose();await backend.dispose();})();}};
 }
 export type Application=Awaited<ReturnType<typeof createApplication>>;

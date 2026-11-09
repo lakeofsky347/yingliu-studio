@@ -56,14 +56,14 @@ test('ZIP expansion is bounded before importing',async()=>{
 test('project-local file symlinks are refused before exporting',async context=>{
   const f=await fixture();try{
     const snapshot=await f.backend.call<StudioSnapshot>('create',{title:'符号链接边界'});const outside=join(f.directory,'outside.bin');await writeFile(outside,'must stay outside');
-    const imported=await f.backend.call<StudioSnapshot>('import',{projectId:snapshot.project!.id,name:'fixture.png',mime:'image/png',dataBase64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='});const asset=imported.project!.assets[0]!;
+    const imported=await f.backend.call<StudioSnapshot>('import',{projectId:snapshot.project!.id,expectedRevision:snapshot.project!.revision,name:'fixture.png',mime:'image/png',dataBase64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='});const asset=imported.project!.assets[0]!;
     await rm(join(snapshot.root!,asset.path!));if(!await createFileSymlinkOrSkip(context,outside,join(snapshot.root!,asset.path!)))return;
     await assert.rejects(exportProjectArchive(f.backend,{projectId:snapshot.project!.id}),/符号|symlink|越界|本项目|路径/i);
   }finally{await f.close();}
 });
 test('application shutdown is idempotent and refuses new writes after draining',async()=>{
   const directory=await mkdtemp(join(tmpdir(),'yingliu-lifecycle-'));const app=await createApplication({dataDirectory:directory,credentials:new MemorySecrets()});
-  try{const result=await app.route('create',{blank:true,title:'关闭生命周期'});assert.equal(result.ok,true);await Promise.all([app.dispose(),app.dispose()]);const late=await app.route('create',{blank:true});assert.ok(!late.ok);assert.equal(late.error.code,'APP_SHUTTING_DOWN');}
+  try{const result=await app.route('create',{blank:true,title:'关闭生命周期',operationId:'create-lifecycle',expectedRevision:null});assert.equal(result.ok,true);await Promise.all([app.dispose(),app.dispose()]);const late=await app.route('create',{blank:true});assert.ok(!late.ok);assert.equal(late.error.code,'APP_SHUTTING_DOWN');}
   finally{await app.dispose();await rm(directory,{recursive:true,force:true});}
 });
 
@@ -120,4 +120,31 @@ test('archive limits are validated and enforced during stream output, compressed
     const restored=await importProjectArchive(f.backend,{dataBase64:exported.dataBase64,limits:{fileBytes:64*1024,totalBytes:bytes.length}});assert.ok(restored.project);
     assert.equal((await f.backend.call<{projects:unknown[]}>('list')).projects.length,2);
   }finally{await f.close();}
+});
+
+test('portable export remains pinned when another edit commits after the snapshot is read',async()=>{
+ const f=await fixture();try{
+  const initial=await f.backend.call<StudioSnapshot>('create',{title:'固定版本导出'}),id=initial.project!.id,shotId=initial.project!.shots[0]!.id;
+  const original=await f.backend.call('source',{projectId:id,shotId});let captured=false;
+  const backend={route:f.backend.route.bind(f.backend),call:async<T=StudioSnapshot>(endpoint:string,payload:unknown={})=>{
+    const value=await f.backend.call<T>(endpoint,payload);
+    if(endpoint==='current'&&!captured){captured=true;await f.backend.call('apply',{projectId:id,expectedRevision:0,title:'稍后更新',sources:[{shotId,source:{...defaultSceneSource(),css:'body { color: red; }'}}]});}
+    return value;
+  }};
+  const archive=await exportProjectArchive(backend,{projectId:id}),files=unzipSync(Buffer.from(archive.dataBase64!,'base64'));
+  assert.equal(JSON.parse(Buffer.from(files['project.json']!).toString()).revision,0);
+  assert.deepEqual(JSON.parse(Buffer.from(files['sources/'+shotId+'.json']!).toString()),original);
+  assert.equal((await f.backend.call<StudioSnapshot>('current',{projectId:id})).project!.revision,1);
+ }finally{await f.close();}
+});
+
+test('archive import retries preserve the user operation ID across temporary extraction directories',async()=>{
+ const f=await fixture();try{
+  const original=await f.backend.call<StudioSnapshot>('create',{title:'导入去重'}),archive=await exportProjectArchive(f.backend,{projectId:original.project!.id});
+  const input={dataBase64:archive.dataBase64!,operationId:'archive-import-once',expectedRevision:null};
+  const first=await importProjectArchive(f.backend,input),second=await importProjectArchive(f.backend,input);
+  assert.equal(first.project!.id,second.project!.id);assert.equal(first.project!.revision,0);
+  assert.equal((await f.backend.operationReceipt(first.project!.id,input.operationId))!.committedRevision,0);
+  assert.equal((await f.backend.call<{projects:unknown[]}>('list')).projects.length,2);
+ }finally{await f.close();}
 });

@@ -3,6 +3,7 @@ import test,{after,before} from 'node:test';
 import {mkdtemp,mkdir,readFile,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {AgentDatabase} from '../src/agent/database.ts';
 import {AppBackend} from '../src/app/backend.ts';
 import {createApplication,MemorySecrets} from '../src/app/application.ts';
 import {AppSceneGenerator} from '../src/host/generator.ts';
@@ -49,7 +50,7 @@ test('failed style and project index writes do not publish candidates and later 
   const f=await fixture();try{
     const saved=await f.backend.call<{style:VideoStyle}>('styles.save',{style:styleInput});
     const created=await f.backend.call<StudioSnapshot>('create',{title:'索引事务',blank:true});
-    for(const filename of ['styles.json','registry.json']){
+    for(const filename of ['styles.json']){
       const path=join(f.dataDirectory,'projects',filename),committed=await readFile(path);
       await rm(path);await mkdir(path);
       try{
@@ -59,6 +60,10 @@ test('failed style and project index writes do not publish candidates and later 
         else{const list=await f.backend.call<{projects:{id:string}[];selected:string}>('list');assert.equal(list.selected,created.project!.id);assert.equal(list.projects.length,1);}
       }finally{await rm(path,{recursive:true,force:true});await writeFile(path,committed);}
     }
+    const transaction=AgentDatabase.prototype.transaction;
+    AgentDatabase.prototype.transaction=async function(statements){if(this.filename.endsWith('registry.sqlite')&&statements.some(statement=>statement.sql.startsWith('UPDATE hub_index')))throw Object.assign(new Error('fixture registry database failure'),{code:'DATABASE_ERROR'});return transaction.call(this,statements);};
+    try{const result=await f.backend.route('archive',{projectId:created.project!.id});assert.equal(result.ok,false);assert.equal((await f.backend.call<{projects:unknown[]}>('list')).projects.length,1);}
+    finally{AgentDatabase.prototype.transaction=transaction;}
     await f.backend.call('styles.save',{style:{...saved.style,prompt:'后续写入成功'}});
     await f.backend.call('archive',{projectId:created.project!.id});
     assert.equal((await f.backend.call<{projects:unknown[]}>('list')).projects.length,0);
@@ -70,10 +75,10 @@ test('archiving is blocked while a local project task runs',async()=>{
   VideoRenderer.prototype.check=async(_root,_project,_settings,signal)=>new Promise((_,reject)=>{if(signal?.aborted)reject(signal.reason);else signal?.addEventListener('abort',()=>reject(signal.reason),{once:true});});
   try{
     const created=await f.backend.call<StudioSnapshot>('create',{title:'运行中工程'});
-    await f.backend.call('preview',{projectId:created.project!.id});
+    const running=await f.backend.call<StudioSnapshot>('preview',{projectId:created.project!.id});
     const result=await f.backend.route('archive',{projectId:created.project!.id});assert.equal(result.ok,false);if(!result.ok)assert.match(result.error.message,/任务运行/);
     assert.equal((await f.backend.call<{projects:unknown[]}>('list')).projects.length,1);
-    await f.backend.call('cancel',{projectId:created.project!.id});
+    await f.backend.call('cancel',{projectId:created.project!.id,expectedTaskId:running.task!.id});
   }finally{VideoRenderer.prototype.check=check;await f.close();}
 });
 

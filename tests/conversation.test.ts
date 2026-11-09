@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createProject, defaultSceneSource, updateShot } from '../src/core/index.ts';
 import type { StudioSnapshot, RpcResult, VideoProject } from '../src/shared/types.ts';
 import type { BackendPort, ChatInput, SecretStore } from '../src/app/contracts.ts';
-import { authorizedImages, compileDirectorPlan, ConversationService } from '../src/app/conversation.ts';
+import { authorizedImages, compileDirectorPlan, ConversationService, mergeAcceptedCandidates } from '../src/app/conversation.ts';
 import { ProviderManager, type ModelMessage } from '../src/app/model.ts';
 import { createFileSymlinkOrSkip } from './fixtures/symlink.ts';
 
@@ -16,6 +16,7 @@ class FixtureBackend implements BackendPort {
   state:StudioSnapshot={project:null,root:null,task:null,previewUrl:null,previewRevision:null,providers:[],recent:[],environment:{browserPath:'fixture',ffmpegPath:'fixture',ffprobePath:'fixture',browserAvailable:true,ffmpegAvailable:true,ffprobeAvailable:true}};
   calls:{endpoint:string;payload:Record<string,any>}[]=[];sources=new Map<string,unknown>();holdPreview=false;failPreview=false;failApply=false;conflictOnce=false;
   async call<T=StudioSnapshot>(endpoint:string,payload:unknown={}):Promise<T>{const data=payload as Record<string,any>;this.calls.push({endpoint,payload:data});
+    if(endpoint==='candidate.validate'){if(this.holdPreview){this.state.task={id:'candidate-check',kind:'preview',status:'running',progress:0,message:'candidate check',startedAt:new Date().toISOString()};await new Promise((_,reject)=>{const signal=data.signal as AbortSignal;signal.addEventListener('abort',()=>reject(signal.reason),{once:true});});}return {id:randomUUID(),candidateHash:'fixture-hash',baseRevision:data.expectedRevision??0,status:this.failPreview?'failed':'passed',checks:['structure','syntax','assets','runtime'].map(id=>({id,status:this.failPreview?'failed':'passed',message:this.failPreview?'运行错误':undefined})),frames:[],createdAt:new Date().toISOString(),validatorVersion:'test'} as T;}
     if(endpoint==='create'){this.state.project=structuredClone(data.project??createProject(data.title,data.topic));this.state.root='/fixture';for(const item of data.sources??[])this.sources.set(item.shotId,item.source);}
     if(endpoint==='apply'){const project=this.state.project!;assert.equal(data.expectedRevision,project.revision);if(this.conflictOnce){this.conflictOnce=false;project.revision++;project.shots[1]!.params.text='用户在模型运行期间手改';throw Object.assign(new Error('工程版本冲突：请读取最新工程'),{code:'REVISION_CONFLICT'});}if(this.failApply)throw new Error('模拟磁盘事务回滚');const revision=project.revision;if(data.project)this.state.project=structuredClone(data.project);if(data.shots){this.state.project!.shots=data.shots;this.state.project!.shotOrder=data.shots.map((shot:any)=>shot.id);}for(const patch of data.shotPatches??[])this.state.project=updateShot(this.state.project!,patch.id,patch.patch);for(const item of data.sources??[])this.sources.set(item.shotId,item.source);this.state.project!.revision=revision+1;}
     if(endpoint==='preview'){this.state.previewUrl='http://fixture.test/preview';this.state.previewRevision=this.state.project!.revision;this.state.task={id:'fixture-preview',kind:'preview',status:this.failPreview?'failed':this.holdPreview?'running':'complete',progress:1,message:this.failPreview?'运行错误':'fixture check',startedAt:new Date().toISOString()};}
@@ -29,9 +30,9 @@ class MockProvider extends ProviderManager {
   prompts:ModelMessage[][]=[];systems:string[]=[];
   constructor(directory:string,private respond:(turns:ModelMessage[],round:number)=>unknown,private secretsValue=new MemorySecrets()){super(directory,secretsValue);}
   async ready(){await this.save({apiKey:'mock-only-not-a-paid-key'});return this;}
-  override async complete(turns:ModelMessage[],system:string,signal:AbortSignal){signal.throwIfAborted();this.prompts.push(structuredClone(turns));this.systems.push(system);const value=this.respond(turns,this.prompts.length);return typeof value==='string'?value:JSON.stringify(value);}
+  override async complete(turns:ModelMessage[],system:string,signal:AbortSignal){signal.throwIfAborted();this.prompts.push(structuredClone(turns));this.systems.push(system);const value=await this.respond(turns,this.prompts.length);return typeof value==='string'?value:JSON.stringify(value);}
 }
-const chat=(message:string,projectId?:string):ChatInput=>({message,projectId,provider:'custom',model:'deepseek-chat'});
+const chat=(message:string,projectId?:string):ChatInput=>({message,projectId,sessionId:'session-test',operationId:randomUUID(),expectedRevision:projectId?0:null,provider:'custom',model:'deepseek-chat'});
 function patchPlan(project:VideoProject,patch:Record<string,unknown>,id=project.shotOrder[1]){return {intent:'modify',done:true,message:'修改已规划',actions:[{tool:'video_update',arguments:{expectedRevision:project.revision,update:{shotPatches:[{id,patch}]}}}]};}
 function firstPlan(count=1){return {intent:'create',done:true,message:'初稿已规划',actions:[{tool:'video_update',arguments:{expectedRevision:0,update:{storyboard:{shots:Array.from({length:count},(_,index)=>({title:'镜头 '+index,durationSeconds:5,params:{text:'主题 '+index}}))},sourcesByIndex:Array.from({length:count},()=>defaultSceneSource())}}}]};}
 
@@ -50,7 +51,7 @@ test('chat and discussion keep an empty workspace and never start preview',()=>w
 
 test('one-shot and twelve-shot drafts use atomic complete create, no fixed three-shot constraint',()=>withDirectory(async directory=>{
   for(const count of [1,12]){const backend=new FixtureBackend(),provider=await new MockProvider(join(directory,String(count)),()=>firstPlan(count)).ready(),service=new ConversationService(backend,provider,join(directory,String(count)));
-    const result=await service.send(chat('制作一个30秒视频'));assert.equal(result.snapshot.project?.shots.length,count);assert.equal(backend.sources.size,count);assert.equal(backend.calls.filter(c=>c.endpoint==='create').length,1);assert.equal(backend.calls.filter(c=>c.endpoint==='apply').length,0);assert.equal(result.snapshot.project!.shots.reduce((n,s)=>n+s.durationFrames,0),900);assert.equal(result.conversation.turns?.[0]?.status,'succeeded');assert.match(result.conversation.messages.at(-1)!.content,/运行检查/);
+    const result=await service.send(chat('制作一个30秒视频'));assert.equal(result.snapshot.project?.shots.length,count);assert.equal(backend.sources.size,count);assert.equal(backend.calls.filter(c=>c.endpoint==='create').length,1);assert.equal(backend.calls.filter(c=>c.endpoint==='apply').length,0);assert.equal(result.snapshot.project!.shots.reduce((n,s)=>n+s.durationFrames,0),900);assert.equal(result.conversation.turns?.[0]?.status,'succeeded');assert.match(result.conversation.messages.at(-1)!.content,/运行验证/);
   }
 }));
 
@@ -64,7 +65,7 @@ test('all valid add/delete/reorder/material/target/source edits commit in one ap
 test('late invalid action rejects the entire plan with no partial writes, then retry succeeds',()=>withDirectory(async directory=>{
   const backend=new FixtureBackend();backend.state.project=createProject('manual','topic');const project=backend.state.project,before=structuredClone(project);let valid=false;
   const provider=await new MockProvider(directory,()=>valid?patchPlan(project,{params:{background:'#112233'}}):{...patchPlan(project,{params:{background:'#112233'}}),actions:[...patchPlan(project,{params:{background:'#112233'}}).actions,{tool:'video_update',arguments:{expectedRevision:0,update:{sources:[{shotId:'missing-shot',source:defaultSceneSource()}]}}}]}).ready();
-  const service=new ConversationService(backend,provider,directory);await assert.rejects(service.send(chat('第二镜背景改成蓝色',project.id)),/源码引用|未选中的镜头/);assert.deepEqual(backend.state.project,before);assert.ok(!backend.calls.some(c=>c.endpoint==='apply'));const saved=await service.history(project.id),failed=saved.turns!.at(-1)!;assert.equal(failed.status,'failed');assert.equal(service.hasActiveTurn(),false);assert.equal(provider.prompts.length,4);assert.match(JSON.stringify(provider.prompts[1]),/计划未提交/);
+  const service=new ConversationService(backend,provider,directory);await assert.rejects(service.send(chat('第二镜背景改成蓝色',project.id)),/源码引用|未选中的镜头|重复/);assert.deepEqual(backend.state.project,before);assert.ok(!backend.calls.some(c=>c.endpoint==='apply'));const saved=await service.history(project.id),failed=saved.turns!.at(-1)!;assert.equal(failed.status,'failed');assert.equal(service.hasActiveTurn(),false);assert.equal(provider.prompts.length,3);assert.match(JSON.stringify(provider.prompts[1]),/计划未提交/);
   valid=true;const result=await service.send({...chat('',project.id),retryTurnId:failed.id});assert.equal(result.conversation.turns!.at(-1)!.retryOf,failed.id);assert.equal(result.snapshot.project!.shots[1]!.params.background,'#112233');
 }));
 
@@ -102,15 +103,40 @@ test('manual selected title survives motion-only changes and out-of-scope patch 
   assert.throws(()=>compileDirectorPlan(patchPlan(backend.state.project!,{params:{motion:'zoom'}},project.shotOrder[0]),backend.state,chat('第二镜推近',project.id),'modify'),/未选中的镜头/);
 }));
 
-test('preview failure preserves committed revision and exposes repairable failed turn',()=>withDirectory(async directory=>{
+test('candidate runtime failure rejects all mutations before commit',()=>withDirectory(async directory=>{
   const backend=new FixtureBackend();backend.failPreview=true;const provider=await new MockProvider(directory,()=>firstPlan(2)).ready(),service=new ConversationService(backend,provider,directory);
-  await assert.rejects(service.send(chat('制作一个视频')),/已保存.*需要修复或撤销/);assert.equal(backend.state.project!.shots.length,2);const saved=await service.history(backend.state.project!.id);assert.equal(saved.turns!.at(-1)!.status,'failed');assert.equal(saved.turns!.at(-1)!.committedRevision,0);assert.ok(!service.hasActiveTurn());
+  await assert.rejects(service.send(chat('制作一个视频')),/候选运行验证|重复/);assert.equal(backend.state.project,null);assert.ok(!backend.calls.some(call=>call.endpoint==='create'));const saved=await service.history();assert.equal(saved.turns!.at(-1)!.status,'failed');assert.equal(saved.turns!.at(-1)!.committedRevision,undefined);
 }));
 
-test('shutdown waits canceled turn and restores pending turn as interrupted after restart',()=>withDirectory(async directory=>{
+test('shutdown aborts candidate validation without publishing a project',()=>withDirectory(async directory=>{
   const backend=new FixtureBackend();backend.holdPreview=true;const provider=await new MockProvider(directory,()=>firstPlan()).ready(),service=new ConversationService(backend,provider,directory);
-  const pending=service.send(chat('制作一个视频'));const rejection=assert.rejects(pending,/取消/);while(!backend.state.task)await new Promise(resolve=>setTimeout(resolve,5));assert.equal(service.activity().running,true);assert.equal((await service.history(backend.state.project!.id)).turns!.at(-1)!.status,'pending');await service.shutdown();await rejection;const stored=await service.history(backend.state.project!.id);assert.equal(stored.turns!.at(-1)!.status,'cancelled');
-  const file=join(directory,'conversations',createHash('sha256').update(backend.state.project!.id).digest('hex')+'.json');const raw=JSON.parse(await readFile(file,'utf8'));raw.turns.at(-1).status='pending';raw.messages.at(-1).status='pending';await writeFile(file,JSON.stringify(raw));const restored=await new ConversationService(backend,provider,directory).history(backend.state.project!.id);assert.equal(restored.turns!.at(-1)!.status,'interrupted');assert.equal(JSON.parse(await readFile(file,'utf8')).turns.at(-1).status,'interrupted');
+  const pending=service.send(chat('制作一个视频'));const rejection=assert.rejects(pending,/取消/);while(!backend.state.task)await new Promise(resolve=>setTimeout(resolve,5));assert.equal(service.activity().running,true);assert.equal((await service.history()).turns!.at(-1)!.status,'pending');await service.shutdown();await rejection;assert.equal((await service.history()).turns!.at(-1)!.status,'cancelled');assert.equal(backend.state.project,null);
+}));
+
+test('old calls missing execution metadata are rejected before any model or backend work',()=>withDirectory(async directory=>{
+  const backend=new FixtureBackend(),provider=await new MockProvider(directory,()=>firstPlan()).ready(),service=new ConversationService(backend,provider,directory);
+  for(const key of ['sessionId','operationId','expectedRevision']){const input:any=chat('制作视频');delete input[key];await assert.rejects(service.send(input),{code:'AGENT_CONTEXT_REQUIRED'});}assert.equal(provider.prompts.length,0);assert.equal(backend.calls.length,0);
+}));
+
+test('done without a requested change cannot succeed',()=>withDirectory(async directory=>{
+  const backend=new FixtureBackend();backend.state.project=createProject('manual','topic');const provider=await new MockProvider(directory,()=>({intent:'modify',done:true,message:'已完成修改',actions:[]})).ready(),service=new ConversationService(backend,provider,directory);
+  await assert.rejects(service.send({...chat('第二镜背景改为蓝色',backend.state.project.id),intent:'modify'}),/没有产生|重复/);assert.equal(backend.calls.filter(call=>call.endpoint==='apply').length,0);assert.equal((await service.history()).turns!.at(-1)!.status,'failed');
+}));
+
+test('retry of an already committed turn validates without replaying a non-idempotent action',()=>withDirectory(async directory=>{
+  const backend=new FixtureBackend();backend.state.project=createProject('manual','topic');backend.state.project.revision=1;const projectId=backend.state.project.id;
+  const provider=await new MockProvider(directory,()=>{throw new Error('retry must not call model');}).ready();
+  const prior:any={id:'old-turn',request:{...chat('添加一个尾声镜头',projectId),intent:'modify'},operationId:'old-op',status:'failed',committedRevision:1,createdAt:'2026-01-01',updatedAt:'2026-01-01'};
+  let saved:any={id:'history',sessionId:'session-test',projectId,messages:[],turns:[prior],provider:'custom',model:'deepseek-chat'};
+  const service=new ConversationService(backend,provider,directory,{sessionId:'session-test',execution:{load:async()=>saved,save:async value=>{saved=value;}}});
+  const result=await service.send({...chat('',projectId),expectedRevision:1,retryTurnId:'old-turn'});assert.equal(result.conversation.turns!.at(-1)!.status,'succeeded');assert.equal(provider.prompts.length,0);assert.equal(backend.calls.filter(call=>call.endpoint==='apply').length,0);assert.equal(backend.state.project.shots.length,3);
+}));
+
+test('accepted child sources stay out of model context and are validated in the final candidate',()=>withDirectory(async directory=>{
+  const backend=new FixtureBackend();backend.state.project=createProject('manual','topic');const base=structuredClone(backend.state.project),shotId=base.shotOrder[0]!;const source={...defaultSceneSource(),html:'<main>PRIVATE_ARTIFACT_SENTINEL</main>'};
+  const provider=await new MockProvider(directory,(_turns,round)=>round===1?{intent:'modify',done:false,message:'采用成员结果',actions:[{tool:'agent_accept',arguments:{candidateId:'candidate-test'}}]}:{intent:'modify',done:true,message:'已采用成员候选',actions:[]}).ready();
+  const service=new ConversationService(backend,provider,directory,{execution:{externalTool:async()=>({receipt:{candidateId:'candidate-test',summary:'镜头完成'},acceptedCandidate:{project:base,sources:{[shotId]:source},baseRevision:base.revision}})}});
+  await service.send({...chat('修改第一镜画面',base.id),intent:'modify'});assert.equal(backend.sources.get(shotId)&&JSON.stringify(backend.sources.get(shotId)).includes('PRIVATE_ARTIFACT_SENTINEL'),true);assert.ok(!JSON.stringify(provider.prompts).includes('PRIVATE_ARTIFACT_SENTINEL'));assert.ok(backend.calls.findIndex(call=>call.endpoint==='candidate.validate')<backend.calls.findIndex(call=>call.endpoint==='apply'));
 }));
 
 test('vision requires explicit per-turn authorization and enforces selected asset scope/bytes/dimensions',()=>withDirectory(async directory=>{
