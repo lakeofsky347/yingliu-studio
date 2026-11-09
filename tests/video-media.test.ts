@@ -45,7 +45,8 @@ test('real video imports, random seeks, code overlays, mixed-shot export and mig
     const undone=await store.moveHistory(created.root,'undo',next.revision);assert.equal(undone.videoClips?.length,0);const redone=await store.moveHistory(created.root,'redo',undone.revision);assert.deepEqual(redone.videoClips,next.videoClips);
     const before=await readdir(join(created.root,'assets'));await assert.rejects(store.importAsset(created.root,{dataBase64:Buffer.from('not a video').toString('base64'),mime:'video/mp4'},env));assert.deepEqual(await readdir(join(created.root,'assets')),before);
     // Opening an old immutable snapshot migrates only its in-memory data and preserves history IDs.
-    const state=JSON.parse(await readFile(join(created.root,'.studio/state.json'),'utf8')),file=join(created.root,'.studio/versions',state.current+'.json');const record=JSON.parse(await readFile(file,'utf8'));record.project.schemaVersion=1;delete record.project.videoClips;record.project.assets=[];await writeFile(file,JSON.stringify(record));
+    const history=await store.history(created.root),current=history.entries[history.cursor]!.id,file=join(created.root,'.studio/versions',current+'.json');const record=JSON.parse(await readFile(file,'utf8'));record.project.schemaVersion=1;delete record.project.videoClips;record.project.assets=[];await writeFile(file,JSON.stringify(record));
+    await rm(join(created.root,'.studio/state.sqlite'));await writeFile(join(created.root,'.studio/state.json'),JSON.stringify({version:1,current,undo:[],redo:[]}));
     const migrated=await new ProjectStore({baseDirectory:directory}).open(created.root);assert.equal(migrated.schemaVersion,2);assert.equal(migrated.id,next.id);assert.equal(migrated.revision,redone.revision);assert.equal(JSON.parse(await readFile(file,'utf8')).project.schemaVersion,1);
   }finally{await renderer.close();await rm(directory,{recursive:true,force:true});}
 });
