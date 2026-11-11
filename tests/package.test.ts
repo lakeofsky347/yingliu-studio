@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cp, mkdir, mkdtemp, readFile, readdir, readlink, rm, symlink, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -74,17 +74,26 @@ test('relative symlinks survive relocation and absolute or escaping links are re
 });
 
 test('portable Linux launcher resolves its moved folder and preserves caller arguments and cwd', { skip: process.platform === 'win32' }, async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'yingliu-launcher-test-'));
+  const physical = await mkdtemp(join(tmpdir(), 'yingliu-launcher-test-'));
+  const logical = `${physical}-link`;
   try {
-    const bundle = join(directory, '含 空格的目录'), unrelated = join(directory, 'caller');
+    // macOS tmpdir is /var, a symlink to /private/var. Shell getcwd() reports the physical path.
+    await symlink(physical, logical);
+    const bundle = join(logical, '含 空格的目录'), unrelated = join(logical, 'caller');
     await mkdir(bundle); await mkdir(unrelated);
     const launcher = join(bundle, 'yingliu-studio.sh');
     await writeFile(launcher, linuxLauncher, { mode: 0o755 });
     await writeFile(join(bundle, 'yingliu-studio'), '#!/bin/sh\nprintf \'%s\\n\' "$PWD" "${ELECTRON_RUN_AS_NODE-unset}" "$@"\n', { mode: 0o755 });
     const result = spawnSync(launcher, ['--flag', '中文 argument with spaces'], { cwd: unrelated, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(result.stdout.trim().split('\n'), [unrelated, 'unset', '--flag', '中文 argument with spaces']);
-  } finally { await rm(directory, { recursive: true, force: true }); }
+    const [printedCwd, electronFlag, flag, argument] = result.stdout.trim().split('\n');
+    assert.equal(await realpath(printedCwd), await realpath(unrelated));
+    assert.notEqual(await realpath(printedCwd), await realpath(bundle));
+    assert.deepEqual([electronFlag, flag, argument], ['unset', '--flag', '中文 argument with spaces']);
+  } finally {
+    await rm(logical, { force: true });
+    await rm(physical, { recursive: true, force: true });
+  }
 });
 
 test('optional desktop entry honors isolated user menu and updates its installation path after moving the bundle', { skip: process.platform === 'win32' }, async () => {
