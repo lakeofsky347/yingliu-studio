@@ -19,7 +19,7 @@ async function fixture(t:TestContext,options:Parameters<typeof startMediaGateway
   await registry.saveModel({id:'image-model',connectionId:image.id,model:'image-test'});await registry.bindRole('image','image-model');
   await registry.saveModel({id:'video-model',connectionId:video.id,model:'video-test',inputModalities:['text','image']});await registry.bindRole('video','video-model');let revision=3,applies=0;
   const port:MediaProjectPort={async databasePath(){return join(directory,'.studio','state.sqlite');},async inspect(){return {revision,shotIds:['shot-1']};},async readImage(){return {bytes:pngFixture,mime:'image/png'};},async validateArtifact(path,mime){assert.ok((await readFile(path)).length>10);return {mime};},async applyResult(input){if(input.expectedRevision!==revision)throw new Error('revision conflict');applies++;revision++;return {assetIds:['asset-'+applies],revision};}};
-  let service=new MediaTaskService(directory,registry,port,{pollIntervalMs:10});t.after(async()=>{await service.dispose();await gateway.close();await rm(directory,{recursive:true,force:true,maxRetries:20,retryDelay:100});});
+  let service=new MediaTaskService(directory,registry,port,{pollIntervalMs:10});t.after(async()=>{await service.dispose();await gateway.close();await rm(directory,{recursive:true,force:true,maxRetries:40,retryDelay:250});});
   return {directory,gateway,registry,port,get service(){return service;},async restart(){await service.dispose();service=new MediaTaskService(directory,registry,port,{pollIntervalMs:10});await service.recover();return service;},setRevision(value:number){revision=value;},get applies(){return applies;}};
 }
 

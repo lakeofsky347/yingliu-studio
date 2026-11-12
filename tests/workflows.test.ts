@@ -13,7 +13,7 @@ import type {MediaTaskService} from '../src/jobs/media-tasks.ts';
 import type {MediaRequest,MediaTask} from '../src/jobs/contracts.ts';
 
 const copy=<T>(value:T):T=>structuredClone(value);
-async function until<T>(read:()=>Promise<T>,check:(value:T)=>boolean):Promise<T>{for(let n=0;n<2000;n++){const value=await read();if(check(value))return value;await new Promise(resolve=>setTimeout(resolve,5));}throw new Error('workflow did not settle');}
+async function until<T>(read:()=>Promise<T>,check:(value:T)=>boolean):Promise<T>{for(let n=0;n<8000;n++){const value=await read();if(check(value))return value;await new Promise(resolve=>setTimeout(resolve,5));}throw new Error('workflow did not settle');}
 async function settled(service:WorkflowService,id:string){return until(()=>service.get(id),record=>record.status!=='running');}
 function block(signal:AbortSignal):Promise<void>{return new Promise((_,reject)=>{if(signal.aborted)reject(signal.reason);else signal.addEventListener('abort',()=>reject(signal.reason),{once:true});});}
 

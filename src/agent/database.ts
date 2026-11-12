@@ -50,11 +50,11 @@ export class AgentDatabase {
       const delay=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
       // Let the worker close SQLite itself. terminate() on Windows can abandon the file handle.
       const acknowledged=await Promise.race([this.request('close',null).then(()=>true,()=>false),delay(5000).then(()=>false)]);
-      const finished=await Promise.race([exited.then(()=>true),delay(acknowledged?1000:0).then(()=>false)]);
+      const finished=await Promise.race([exited.then(()=>true),delay(acknowledged?4000:0).then(()=>false)]);
       if(!finished)await worker.terminate();
-      await exited;
+      await Promise.race([exited,delay(2000)]);
       if(this.worker===worker)this.worker=undefined;
-      if(process.platform==='win32'&&this.filename!==':memory:')await delay(150);
+      if(process.platform==='win32'&&this.filename!==':memory:')await delay(400);
     })();
   }
 }

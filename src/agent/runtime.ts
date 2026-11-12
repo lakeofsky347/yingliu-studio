@@ -49,7 +49,7 @@ export class AgentRuntime {
     this.running.set(taskId,{controller,promise});return promise;
   }
   private async schedule():Promise<void>{if((await this.repository.listCandidates()).filter(candidate=>['submitted','validated'].includes(candidate.status)).length>=AGENT_LIMITS.pendingAcceptance)return;for(const task of await this.repository.listTasks())if(task.parentTaskId&&task.status==='queued'&&!this.running.has(task.id)&&this.running.size<AGENT_LIMITS.activeChildren)void this.run(task.id).catch(()=>{});}
-  private async execute(taskId:string,controller:AbortController):Promise<AgentTask>{
+  private async execute(taskId:string,controller:AbortController,retries=0):Promise<AgentTask>{
     let lease:AgentLease|undefined,heartbeat:ReturnType<typeof setInterval>|undefined,renewing=false;
     const signal=controller.signal;
     try{
@@ -101,8 +101,10 @@ export class AgentRuntime {
       }
       return await this.repository.transition(lease,'blocked',{error:'成员已达到四轮规划上限，保留已有产物',checkpoint:'round-limit'});
     }catch(error){
+      const code=(error as {code?:string})?.code;
+      if(code==='DB_CONFLICT'&&retries<2){if(heartbeat)clearInterval(heartbeat);heartbeat=undefined;return this.execute(taskId,controller,retries+1);}
       const task=await this.repository.getTask(taskId);if(!lease||task.generation!==lease.generation||task.status==='cancelled')return task;
-      const code=(error as {code?:string})?.code;const status=signal.aborted?'paused':code==='RECONCILIATION_REQUIRED'?'blocked':code==='SCOPE_DENIED'||code==='TOOL_DENIED'?'failed':'blocked';
+      const status=signal.aborted?'paused':code==='RECONCILIATION_REQUIRED'?'blocked':code==='SCOPE_DENIED'||code==='TOOL_DENIED'?'failed':'blocked';
       try{return await this.repository.transition(lease,status,{error:error instanceof Error?error.message:String(error),checkpoint:code??'execution-error'});}catch{return this.repository.getTask(taskId);}
     }finally{if(heartbeat)clearInterval(heartbeat);}
   }
