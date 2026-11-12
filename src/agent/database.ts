@@ -1,10 +1,25 @@
 import {execFileSync,fork,type ChildProcess} from 'node:child_process';
+import {randomUUID} from 'node:crypto';
 import {existsSync} from 'node:fs';
 import {dirname,join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 export interface DatabaseStatement {sql:string;params?:unknown[];expectChanges?:number}
 export interface DatabaseResult {rows?:unknown[];changes?:number}
+
+interface Pending {resolve:(value:unknown)=>void;reject:(error:Error)=>void}
+interface Pool {
+  key:string;
+  child:ChildProcess;
+  processId?:number;
+  users:number;
+  sequence:number;
+  pending:Map<number,Pending>;
+  dead:boolean;
+  stopping?:Promise<void>;
+}
+
+const pools=new Map<string,Pool>();
 
 function workerFilename():string {
   // The source module, bundled web server and bundled Electron main have different roots.
@@ -19,49 +34,69 @@ function forceStop(pid:number){
   try{process.kill(pid,'SIGKILL');}catch{/* the process already exited */}
 }
 
-/** Async facade: SQLite runs in a child process so Windows releases the file when that process exits. */
+function failPending(pool:Pool,error:Error){for(const request of pool.pending.values())request.reject(error);pool.pending.clear();}
+
+function createPool(key:string,filename:string):Pool {
+  const child=fork(workerFilename(),[filename],{execArgv:[],stdio:['ignore','ignore','inherit','ipc'],serialization:'advanced'});
+  const pool:Pool={key,child,processId:child.pid,users:0,sequence:0,pending:new Map(),dead:false};
+  child.on('message',(message:{id:number;value?:unknown;error?:{message:string;code?:string;errcode?:number;statementIndex?:number}})=>{
+    const request=pool.pending.get(message.id);if(!request)return;pool.pending.delete(message.id);
+    if(message.error)request.reject(Object.assign(new Error(message.error.message),{code:message.error.code??'DATABASE_ERROR',errcode:message.error.errcode,statementIndex:message.error.statementIndex}));else request.resolve(message.value);
+    if(!pool.pending.size)child.unref();
+  });
+  child.on('error',error=>failPending(pool,error));
+  child.on('exit',code=>{pool.dead=true;if(pools.get(key)===pool)pools.delete(key);if(pool.pending.size)failPending(pool,Object.assign(new Error(`SQLite worker exited (${code})`),{code:'DATABASE_WORKER_EXIT'}));});
+  child.unref();return pool;
+}
+
+function acquire(key:string,filename:string):Pool {
+  let pool=pools.get(key);
+  if(!pool||pool.dead||pool.child.exitCode!==null||pool.child.signalCode!==null){pool=createPool(key,filename);pools.set(key,pool);}
+  pool.users++;return pool;
+}
+
+function shutdown(pool:Pool):Promise<void> {
+  if(pool.stopping)return pool.stopping;
+  pool.dead=true;if(pools.get(pool.key)===pool)pools.delete(pool.key);
+  return pool.stopping=(async()=>{
+    const child=pool.child;
+    const exited=new Promise<void>(resolve=>{if(child.exitCode!==null||child.signalCode!==null)resolve();else child.once('exit',()=>resolve());});
+    if(pool.processId)forceStop(pool.processId);
+    await Promise.race([exited,new Promise(resolve=>setTimeout(resolve,5000))]);
+    child.unref();try{child.disconnect();}catch{/* the IPC channel is already gone */}
+    failPending(pool,Object.assign(new Error('Database has been closed'),{code:'DATABASE_CLOSED'}));
+    if(child.exitCode===null&&child.signalCode===null)throw Object.assign(new Error('SQLite process '+(pool.processId??'')+' is still running'),{code:'DATABASE_WORKER_EXIT'});
+  })();
+}
+
+/** One child process per database file. A second handle shares that process so Windows does not keep two locks. */
 export class AgentDatabase {
   readonly filename:string;
-  private child?:ChildProcess;
-  private processId?:number;
-  private sequence=0;
+  private readonly key:string;
+  private pool?:Pool;
   private closed=false;
   private closing?:Promise<void>;
-  private pending=new Map<number,{resolve:(value:unknown)=>void;reject:(error:Error)=>void}>();
-  constructor(filename:string){this.filename=filename===':memory:'?filename:resolve(filename);}
-  private start():ChildProcess {
-    if(this.child)return this.child;
-    const child=fork(workerFilename(),[this.filename],{execArgv:[],stdio:['ignore','ignore','inherit','ipc'],serialization:'advanced'});this.child=child;this.processId=child.pid;
-    child.on('message',(message:{id:number;value?:unknown;error?:{message:string;code?:string;errcode?:number;statementIndex?:number}})=>{
-      const request=this.pending.get(message.id);if(!request)return;this.pending.delete(message.id);
-      if(message.error)request.reject(Object.assign(new Error(message.error.message),{code:message.error.code??'DATABASE_ERROR',errcode:message.error.errcode,statementIndex:message.error.statementIndex}));else request.resolve(message.value);
-      if(!this.pending.size)child.unref();
-    });
-    const failed=(error:Error)=>{for(const request of this.pending.values())request.reject(error);this.pending.clear();};
-    child.on('error',failed);
-    child.on('exit',code=>{if(this.child===child){this.child=undefined;if(this.pending.size)failed(Object.assign(new Error(`SQLite worker exited (${code})`),{code:'DATABASE_WORKER_EXIT'}));}});
-    child.unref();return child;
+  constructor(filename:string){
+    if(filename===':memory:'){this.filename=filename;this.key=':memory:'+randomUUID();}
+    else{this.filename=resolve(filename);this.key=this.filename;}
   }
-  private request(kind:'query'|'transaction'|'close',payload:unknown):Promise<unknown>{
-    if(this.closed&&kind!=='close')return Promise.reject(Object.assign(new Error('Database has been closed'),{code:'DATABASE_CLOSED'}));
-    const child=this.start(),id=++this.sequence;
-    return new Promise((resolve,reject)=>{this.pending.set(id,{resolve,reject});child.ref();try{child.send({id,kind,payload});}catch(error){this.pending.delete(id);if(!this.pending.size)child.unref();reject(error instanceof Error?error:new Error(String(error)));}});
+  private ensure():Pool {
+    if(this.closed)throw Object.assign(new Error('Database has been closed'),{code:'DATABASE_CLOSED'});
+    if(!this.pool||this.pool.dead)this.pool=acquire(this.key,this.filename);
+    return this.pool;
+  }
+  private request(kind:'query'|'transaction',payload:unknown):Promise<unknown>{
+    const pool=this.ensure(),id=++pool.sequence;
+    return new Promise((resolve,reject)=>{pool.pending.set(id,{resolve,reject});pool.child.ref();try{pool.child.send({id,kind,payload});}catch(error){pool.pending.delete(id);if(!pool.pending.size)pool.child.unref();reject(error instanceof Error?error:new Error(String(error)));}});
   }
   async query<T=Record<string,unknown>>(sql:string,params:unknown[]=[]):Promise<T[]>{return await this.request('query',{sql,params}) as T[];}
   async transaction(statements:DatabaseStatement[]):Promise<DatabaseResult[]>{return await this.request('transaction',statements) as DatabaseResult[];}
   close():Promise<void>{
     if(this.closing)return this.closing;this.closed=true;
-    return this.closing=(async()=>{
-      const child=this.child,pid=this.processId;
-      if(!child&&!pid)return;
-      const exited=child?new Promise<void>(resolve=>{if(child.exitCode!==null||child.signalCode!==null)resolve();else child.once('exit',()=>resolve());}):Promise.resolve();
-      const delay=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
-      // Kill the process tree before it can exit on its own. A self-exit can leave a child holding the Windows file lock.
-      if(pid)forceStop(pid);
-      await Promise.race([exited,delay(5000)]);
-      if(child){child.unref();try{child.disconnect();}catch{/* the IPC channel is already gone */}}
-      if(child&&this.child===child)this.child=undefined;
-      if(child&&child.exitCode===null&&child.signalCode===null)throw Object.assign(new Error('SQLite process '+(pid??'')+' is still running'),{code:'DATABASE_WORKER_EXIT'});
-    })();
+    const pool=this.pool;this.pool=undefined;
+    if(!pool)return this.closing=Promise.resolve();
+    pool.users=Math.max(0,pool.users-1);
+    if(pool.users>0)return this.closing=Promise.resolve();
+    return this.closing=shutdown(pool);
   }
 }
