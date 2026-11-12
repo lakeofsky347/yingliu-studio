@@ -4,7 +4,7 @@ import {dirname} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 
 if(workerData.filename!==':memory:')mkdirSync(dirname(workerData.filename),{recursive:true});
-const database=new DatabaseSync(workerData.filename,{timeout:5000,enableForeignKeyConstraints:true,allowExtension:false,enableDoubleQuotedStringLiterals:false});
+let database=new DatabaseSync(workerData.filename,{timeout:5000,enableForeignKeyConstraints:true,allowExtension:false,enableDoubleQuotedStringLiterals:false});
 // DELETE also supports concurrent processes and works with the SQLite shipped in Node 22.18.
 database.exec('PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000');
 function execute(input){
@@ -22,7 +22,7 @@ function execute(input){
 parentPort.on('message',({id,kind,payload})=>{
   try{
     let value;
-    if(kind==='close'){try{database.close();}catch(error){parentPort.postMessage({id,error:{message:error instanceof Error?error.message:String(error),code:'DATABASE_ERROR'}});parentPort.close();return;}parentPort.postMessage({id,value:null});parentPort.close();return;}
+    if(kind==='close'){const current=database;database=undefined;try{current?.close();}catch(error){parentPort.postMessage({id,error:{message:error instanceof Error?error.message:String(error),code:'DATABASE_ERROR'}});parentPort.close();return;}parentPort.postMessage({id,value:null});parentPort.close();return;}
     if(kind==='query')value=execute(payload).rows??[];
     else if(kind==='transaction'){
       if(!Array.isArray(payload))throw new Error('Invalid transaction');

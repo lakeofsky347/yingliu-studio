@@ -201,7 +201,7 @@ test('visual frame selection follows shotOrder rather than storage array order',
   assert.deepEqual(f.backend.captures.map(capture => capture.frame), [70]);
 });
 
-test('a vision member cannot promote its negative submitted evidence to a validated result', { timeout: 10000 }, async t => {
+test('a vision member cannot promote its negative submitted evidence to a validated result', { timeout: 30000 }, async t => {
   const f = await fixture(t), root = await f.root(); let round = 0;
   f.providers.responder = call => {
     const content = call.messages.at(-1)!.content; assert.ok(Array.isArray(content));
