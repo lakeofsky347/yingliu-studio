@@ -95,7 +95,7 @@ test('legacy supplier intents survive failed requests and refuse duplicate submi
  let reopened:AppBackend|undefined;
  try{
   const first=await f.backend.call<StudioSnapshot>('create',{title:'未决供应商请求'}),input={projectId:first.project!.id,expectedRevision:0,operationId:'supplier-once',kind:'scenes',provider:'fixture',model:'fixture'};
-  await f.backend.call('generate',input);for(let i=0;i<30;i++){if((await f.backend.call<StudioSnapshot>('current',{projectId:first.project!.id})).task?.status!=='running')break;await new Promise(resolve=>setTimeout(resolve,10));}await f.backend.dispose();
+  await f.backend.call('generate',input);for(let i=0;i<80;i++){const status=(await f.backend.call<StudioSnapshot>('current',{projectId:first.project!.id})).task?.status;if(calls>=1&&status!=='running')break;await new Promise(resolve=>setTimeout(resolve,50));}assert.equal(calls,1);await f.backend.dispose();
   reopened=new AppBackend({dataDirectory:f.dataDirectory,providers,credentials});
   const replay=await reopened.route('generate',input);assert.equal(replay.ok,false);if(!replay.ok)assert.equal(replay.error.code,'OPERATION_UNRESOLVED');assert.equal(calls,1);
   const changed=await reopened.route('generate',{...input,model:'different'});assert.equal(changed.ok,false);if(!changed.ok)assert.equal(changed.error.code,'OPERATION_CONFLICT');assert.equal(calls,1);

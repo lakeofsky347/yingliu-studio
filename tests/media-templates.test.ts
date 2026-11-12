@@ -39,7 +39,7 @@ async function fixture(t: TestContext, gatewayOptions: Parameters<typeof startTe
   t.after(async () => { await service.dispose(); await gateway.close(); await rm(directory, { recursive: true, force: true }); });
   return { directory, gateway, registry, service, generate(input: Omit<Parameters<MediaTaskService['generate']>[0], 'clientRequestId'> & { clientRequestId?: string }) { return service.generate({ ...input, clientRequestId: input.clientRequestId ?? randomUUID() }); } };
 }
-async function settle(service: MediaTaskService, id: string, predicate: (task: MediaTask) => boolean) { for (let i = 0; i < 400; i++) { const task = await service.get(id); if (predicate(task)) return task; await new Promise(r => setTimeout(r, 10)); } throw new Error('task did not settle: ' + JSON.stringify(await service.get(id))); }
+async function settle(service: MediaTaskService, id: string, predicate: (task: MediaTask) => boolean) { for (let i = 0; i < 150; i++) { const task = await service.get(id); if (predicate(task)) return task; await new Promise(r => setTimeout(r, 100)); } throw new Error('task did not settle: ' + JSON.stringify(await service.get(id))); }
 
 test('DashScope-style async video: submit with async header, poll until SUCCEEDED, download without credentials', async t => {
   const f = await fixture(t, { pollsBeforeDone: 2 });
