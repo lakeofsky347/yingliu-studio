@@ -26,6 +26,11 @@ export function detectEnvironment(settings:Partial<EnvironmentSettings>={},optio
 function hash(buffer:Buffer|string):string { return createHash('sha256').update(buffer).digest('hex'); }
 function json(value:unknown):string { return JSON.stringify(value,null,2)+'\n'; }
 function aborted(signal?:AbortSignal):void { if(signal?.aborted)throw new Error('Task cancelled'); }
+async function closeBrowser(browser:Browser):Promise<void>{
+  const pid=(browser as Browser&{process?:()=>{pid?:number}|null}).process?.()?.pid;
+  await Promise.race([browser.close().catch(()=>undefined),new Promise(resolve=>setTimeout(resolve,8_000))]);
+  if(pid){try{process.kill(pid,'SIGKILL');}catch{/* the browser already exited */}}
+}
 function keyFrames(spec:VideoSpec):number[] { return [...new Set(spec.shots.flatMap(shot=>[shot.startFrame,Math.floor((shot.startFrame+shot.endFrame-1)/2),shot.endFrame-1]))].sort((a,b)=>a-b); }
 function safeId(id:string):string { if(!/^[a-zA-Z0-9_-]{1,100}$/.test(id))throw new Error('Unsafe scene ID');return id; }
 async function deadline<T>(promise:Promise<T>,message:string):Promise<T> {
@@ -169,7 +174,7 @@ export class VideoRenderer {
       }),'Scene ready');
       if(!ready.ok){issues.push({shotId:ready.shotId,message:ready.message??'Renderer ready failed'});throw new Error(ready.message);}
       return {browser,page,removeAbort:()=>signal?.removeEventListener('abort',cancel)};
-    }catch(error){signal?.removeEventListener('abort',cancel);await browser.close().catch(()=>{});this.browsers.delete(browser);throw error;}
+    }catch(error){signal?.removeEventListener('abort',cancel);await closeBrowser(browser);this.browsers.delete(browser);throw error;}
   }
   private async frame(page:Page,spec:VideoSpec,frame:number):Promise<{buffer:Buffer;shotId:string}> {
     const result=await deadline(page.evaluate(async input=>{
@@ -192,7 +197,7 @@ export class VideoRenderer {
       if(errors.length)throw new Error(errors.map(error=>error.message).join('; '));
       const relative='.studio/inspection/'+project.revision+'-'+frame+'-'+randomUUID()+'.png',file=await projectPath(root,relative);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,result.buffer);
       return {frame,shotId:result.shotId,path:file,sha256:hash(result.buffer),url:server.origin+'/'+relative};
-    }finally{if(connection){connection.removeAbort();await connection.browser.close().catch(()=>{});this.browsers.delete(connection.browser);}}
+    }finally{if(connection){connection.removeAbort();await closeBrowser(connection.browser);this.browsers.delete(connection.browser);}}
   }
   /** Render an immutable candidate without writing the live project or its runtime. */
   async captureCandidate(root:string,project:VideoProject,sources:Record<string,SceneSource>,settings:EnvironmentSettings,frame:number,signal?:AbortSignal):Promise<{bytes:Uint8Array;mime:string;sha256:string}>{
@@ -255,7 +260,7 @@ export class VideoRenderer {
       await this.verifySeek(connection.page,spec,frames,errors,signal);
       if(errors.length===0)for(const shot of project.shots)await this.store.markSourceGood(root,shot);
     }catch(error){const e=error as Error&RenderIssue;errors.push({shotId:e.shotId,frame:e.frame,message:signal?.aborted?'Task cancelled':e.message});}
-    finally{if(connection){connection.removeAbort();await connection.browser.close().catch(()=>{});this.browsers.delete(connection.browser);}}
+    finally{if(connection){connection.removeAbort();await closeBrowser(connection.browser);this.browsers.delete(connection.browser);}}
     const reportPath=path.join(reportRoot,'check.json');const result={ok:errors.length===0,errors:deduplicate(errors),frames,reportPath};
     await fs.writeFile(reportPath,json(result));return result;
   }
@@ -334,7 +339,7 @@ export class VideoRenderer {
       await fs.writeFile(logPath,log);await fs.writeFile(path.join(outputRoot,'failure.json'),json({status:signal.aborted?'cancelled':'failed',message:(error as Error).message,errors:deduplicate(errors),frames,inputHashes,snapshotRoot}));
       await fs.rm(mp4Path,{force:true});throw new Error(signal.aborted?'Task cancelled':(error as Error).message);
     }finally{
-      signal.removeEventListener('abort',cancel);if(connection){connection.removeAbort();await connection.browser.close().catch(()=>{});this.browsers.delete(connection.browser);}
+      signal.removeEventListener('abort',cancel);if(connection){connection.removeAbort();await closeBrowser(connection.browser);this.browsers.delete(connection.browser);}
       await closeServer(snapshotServer.server);
     }
   }
@@ -362,7 +367,7 @@ export class VideoRenderer {
   async close():Promise<void> {
     for(const child of this.children)stopChild(child);
     await this.audioMixer.close();
-    await Promise.allSettled([...this.browsers].map(browser=>browser.close()));this.browsers.clear();
+    await Promise.allSettled([...this.browsers].map(browser=>closeBrowser(browser)));this.browsers.clear();
     await Promise.allSettled([...this.pendingServers.values()]);
     await Promise.allSettled([...this.servers.values()].map(server=>closeServer(server.server)));this.servers.clear();this.pendingServers.clear();
   }

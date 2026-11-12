@@ -117,9 +117,9 @@ export class AgentDatabase {
     if(!this.pool||this.pool.dead)this.pool=acquire(this.key,this.filename);
     return this.pool;
   }
-  private request(kind:'query'|'transaction',payload:unknown):Promise<unknown>{
+  private request(kind:'query'|'transaction',payload:unknown,attempt=0):Promise<unknown>{
     const pool=this.ensure(),id=++pool.sequence;
-    return new Promise((resolve,reject)=>{pool.pending.set(id,{resolve,reject});pool.child.ref();try{pool.child.send({id,kind,payload});}catch(error){pool.pending.delete(id);if(!pool.pending.size)pool.child.unref();reject(error instanceof Error?error:new Error(String(error)));}});
+    return new Promise((resolve,reject)=>{pool.pending.set(id,{resolve,reject});pool.child.ref();try{pool.child.send({id,kind,payload});}catch(error){pool.pending.delete(id);if(!pool.pending.size)pool.child.unref();const failed=error instanceof Error?error:new Error(String(error));if(attempt<1&&(failed as NodeJS.ErrnoException).code==='EPIPE'){pool.dead=true;if(pools.get(pool.key)===pool)pools.delete(pool.key);this.pool=undefined;resolve(this.request(kind,payload,attempt+1));return;}reject(failed);}});
   }
   async query<T=Record<string,unknown>>(sql:string,params:unknown[]=[]):Promise<T[]>{return await this.request('query',{sql,params}) as T[];}
   async transaction(statements:DatabaseStatement[]):Promise<DatabaseResult[]>{return await this.request('transaction',statements) as DatabaseResult[];}
