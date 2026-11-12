@@ -71,7 +71,7 @@ async function fixture(t: TestContext) {
   const coordinator = new AgentCoordinator({ dataDirectory: directory, backend: backend as unknown as AppBackend, providers, media: {} as MediaTaskService, async voice() { throw new Error('Unexpected voice call'); } });
   const repo = await coordinator.repositoryFor(backend.project.id); let closed = false;
   const dispose = async () => { if (!closed) { closed = true; await coordinator.dispose(); } };
-  t.after(async () => { await dispose(); await rm(directory, { recursive: true, force: true, maxRetries: 40, retryDelay: 250 }); });
+  t.after(async () => { await dispose(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); });
   async function root(name = 'root', scope: AgentScope = rootScope): Promise<RootToolContext> {
     const session = await repo.createSession({ name }), task = await repo.createTask({ sessionId: session.id, goal: name, scope }), lease = await repo.claimTask(task.id, 'fixture-' + name);
     return { lease, projectId: backend.project.id, snapshot: backend.snapshot(), taskId: task.id, sessionId: session.id, toolOperationId: randomUUID(), request: { sessionId: session.id, projectId: backend.project.id, operationId: randomUUID(), expectedRevision: backend.project.revision, message: name, provider: 'custom', model: 'deepseek-chat', allowImageUpload: true } };

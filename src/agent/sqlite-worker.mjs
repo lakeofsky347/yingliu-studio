@@ -27,7 +27,12 @@ function execute(input){
 function handle({id,kind,payload}){
   try{
     let value;
-    if(kind==='close'){const current=database;database=undefined;try{current?.close();}catch(error){post({id,error:{message:error instanceof Error?error.message:String(error),code:'DATABASE_ERROR'}});shutdown();return;}post({id,value:null});shutdown();return;}
+    if(kind==='close'){
+      const current=database;database=undefined;
+      if(parentPort){try{current?.close();}catch(error){post({id,error:{message:error instanceof Error?error.message:String(error),code:'DATABASE_ERROR'}});shutdown();return;}post({id,value:null});shutdown();return;}
+      // A child process must exit even if SQLite close stalls; the OS then drops the Windows file lock.
+      post({id,value:null});process.exit(0);
+    }
     if(!database)throw Object.assign(new Error('Database has been closed'),{code:'DATABASE_CLOSED'});
     if(kind==='query')value=execute(payload).rows??[];
     else if(kind==='transaction'){

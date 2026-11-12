@@ -1,4 +1,4 @@
-import {fork,type ChildProcess} from 'node:child_process';
+import {fork,spawn,type ChildProcess} from 'node:child_process';
 import {existsSync} from 'node:fs';
 import {dirname,join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -46,12 +46,17 @@ export class AgentDatabase {
     if(this.closing)return this.closing;this.closed=true;
     return this.closing=(async()=>{
       const child=this.child;if(!child)return;
-      const exited=new Promise<void>(resolve=>{child.once('exit',()=>resolve());});
+      const exited=new Promise<void>(resolve=>{if(child.exitCode!==null||child.signalCode!==null)resolve();else child.once('exit',()=>resolve());});
       const delay=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
-      await Promise.race([this.request('close',null).then(()=>undefined,()=>undefined),delay(5000)]);
-      const finished=await Promise.race([exited.then(()=>true),delay(3000).then(()=>false)]);
-      if(!finished)child.kill();
+      await Promise.race([this.request('close',null).then(()=>undefined,()=>undefined),delay(2000)]);
+      if(child.exitCode===null&&child.signalCode===null){
+        try{child.kill('SIGKILL');}catch{/* the process already exited */}
+        // Windows can ignore SIGKILL while SQLite still owns the file. Kill the tree.
+        if(process.platform==='win32'&&child.pid)spawn('taskkill',['/PID',String(child.pid),'/T','/F'],{stdio:'ignore',windowsHide:true}).unref();
+      }
       await Promise.race([exited,delay(2000)]);
+      child.unref();
+      try{child.disconnect();}catch{/* the IPC channel is already gone */}
       if(this.child===child)this.child=undefined;
     })();
   }
