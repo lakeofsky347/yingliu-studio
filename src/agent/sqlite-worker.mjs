@@ -30,9 +30,9 @@ function handle({id,kind,payload}){
     if(kind==='close'){
       const current=database;database=undefined;
       if(parentPort){try{current?.close();}catch(error){post({id,error:{message:error instanceof Error?error.message:String(error),code:'DATABASE_ERROR'}});shutdown();return;}post({id,value:null});shutdown();return;}
-      // SIGKILL skips Node shutdown. process.exit() can stall inside SQLite and keep the Windows file lock.
+      try{current?.close();}catch{/* the parent is about to terminate this process */}
       try{post({id,value:null});}catch{/* the parent may already be gone */}
-      process.kill(process.pid,'SIGKILL');
+      return;
     }
     if(!database)throw Object.assign(new Error('Database has been closed'),{code:'DATABASE_CLOSED'});
     if(kind==='query')value=execute(payload).rows??[];

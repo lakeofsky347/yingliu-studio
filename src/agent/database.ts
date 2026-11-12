@@ -14,15 +14,16 @@ function workerFilename():string {
 }
 
 function forceStop(pid:number){
+  // taskkill /T runs before the process exits, so Windows children cannot keep the database open.
+  if(process.platform==='win32'){try{execFileSync('taskkill',['/PID',String(pid),'/T','/F'],{stdio:'ignore',windowsHide:true,timeout:8000});}catch{/* the process already exited */}}
   try{process.kill(pid,'SIGKILL');}catch{/* the process already exited */}
-  // Node's child handle can ignore kill after unref. Terminate by PID, including Windows children.
-  if(process.platform==='win32'){try{execFileSync('taskkill',['/PID',String(pid),'/T','/F'],{stdio:'ignore',windowsHide:true,timeout:5000});}catch{/* the process already exited */}}
 }
 
 /** Async facade: SQLite runs in a child process so Windows releases the file when that process exits. */
 export class AgentDatabase {
   readonly filename:string;
   private child?:ChildProcess;
+  private processId?:number;
   private sequence=0;
   private closed=false;
   private closing?:Promise<void>;
@@ -30,13 +31,13 @@ export class AgentDatabase {
   constructor(filename:string){this.filename=filename===':memory:'?filename:resolve(filename);}
   private start():ChildProcess {
     if(this.child)return this.child;
-    const child=fork(workerFilename(),[this.filename],{execArgv:[],stdio:['ignore','inherit','inherit','ipc'],serialization:'advanced'});this.child=child;
+    const child=fork(workerFilename(),[this.filename],{execArgv:[],stdio:['ignore','ignore','inherit','ipc'],serialization:'advanced'});this.child=child;this.processId=child.pid;
     child.on('message',(message:{id:number;value?:unknown;error?:{message:string;code?:string;errcode?:number;statementIndex?:number}})=>{
       const request=this.pending.get(message.id);if(!request)return;this.pending.delete(message.id);
       if(message.error)request.reject(Object.assign(new Error(message.error.message),{code:message.error.code??'DATABASE_ERROR',errcode:message.error.errcode,statementIndex:message.error.statementIndex}));else request.resolve(message.value);
       if(!this.pending.size)child.unref();
     });
-    const failed=(error:Error)=>{if(this.child===child)this.child=undefined;for(const request of this.pending.values())request.reject(error);this.pending.clear();};
+    const failed=(error:Error)=>{for(const request of this.pending.values())request.reject(error);this.pending.clear();};
     child.on('error',failed);
     child.on('exit',code=>{if(this.child===child){this.child=undefined;if(this.pending.size)failed(Object.assign(new Error(`SQLite worker exited (${code})`),{code:'DATABASE_WORKER_EXIT'}));}});
     child.unref();return child;
@@ -51,17 +52,16 @@ export class AgentDatabase {
   close():Promise<void>{
     if(this.closing)return this.closing;this.closed=true;
     return this.closing=(async()=>{
-      const child=this.child;if(!child)return;
-      const pid=child.pid;
-      const exited=new Promise<void>(resolve=>{if(child.exitCode!==null||child.signalCode!==null)resolve();else child.once('exit',()=>resolve());});
+      const child=this.child,pid=this.processId;
+      if(!child&&!pid)return;
+      const exited=child?new Promise<void>(resolve=>{if(child.exitCode!==null||child.signalCode!==null)resolve();else child.once('exit',()=>resolve());}):Promise.resolve();
       const delay=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
-      await Promise.race([this.request('close',null).then(()=>undefined,()=>undefined),delay(1000)]);
-      if(child.exitCode===null&&child.signalCode===null&&pid)forceStop(pid);
-      await Promise.race([exited,delay(3000)]);
-      child.unref();
-      try{child.disconnect();}catch{/* the IPC channel is already gone */}
-      if(this.child===child)this.child=undefined;
-      if(child.exitCode===null&&child.signalCode===null)throw Object.assign(new Error('SQLite process '+(pid??'')+' is still running'),{code:'DATABASE_WORKER_EXIT'});
+      // Kill the process tree before it can exit on its own. A self-exit can leave a child holding the Windows file lock.
+      if(pid)forceStop(pid);
+      await Promise.race([exited,delay(5000)]);
+      if(child){child.unref();try{child.disconnect();}catch{/* the IPC channel is already gone */}}
+      if(child&&this.child===child)this.child=undefined;
+      if(child&&child.exitCode===null&&child.signalCode===null)throw Object.assign(new Error('SQLite process '+(pid??'')+' is still running'),{code:'DATABASE_WORKER_EXIT'});
     })();
   }
 }
