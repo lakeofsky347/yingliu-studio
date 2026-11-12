@@ -1,4 +1,4 @@
-import {fork,spawn,type ChildProcess} from 'node:child_process';
+import {execFileSync,fork,type ChildProcess} from 'node:child_process';
 import {existsSync} from 'node:fs';
 import {dirname,join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -11,6 +11,12 @@ function workerFilename():string {
   const directory=typeof __dirname==='string'?__dirname:dirname(fileURLToPath(import.meta.url));
   for(const candidate of [join(directory,'sqlite-worker.mjs'),join(directory,'agent/sqlite-worker.mjs'),join(directory,'../agent/sqlite-worker.mjs')])if(existsSync(candidate))return candidate;
   throw Object.assign(new Error('SQLite worker is missing from the application package'),{code:'DATABASE_WORKER_MISSING'});
+}
+
+function forceStop(pid:number){
+  try{process.kill(pid,'SIGKILL');}catch{/* the process already exited */}
+  // Node's child handle can ignore kill after unref. Terminate by PID, including Windows children.
+  if(process.platform==='win32'){try{execFileSync('taskkill',['/PID',String(pid),'/T','/F'],{stdio:'ignore',windowsHide:true,timeout:5000});}catch{/* the process already exited */}}
 }
 
 /** Async facade: SQLite runs in a child process so Windows releases the file when that process exits. */
@@ -46,18 +52,16 @@ export class AgentDatabase {
     if(this.closing)return this.closing;this.closed=true;
     return this.closing=(async()=>{
       const child=this.child;if(!child)return;
+      const pid=child.pid;
       const exited=new Promise<void>(resolve=>{if(child.exitCode!==null||child.signalCode!==null)resolve();else child.once('exit',()=>resolve());});
       const delay=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
-      await Promise.race([this.request('close',null).then(()=>undefined,()=>undefined),delay(2000)]);
-      if(child.exitCode===null&&child.signalCode===null){
-        try{child.kill('SIGKILL');}catch{/* the process already exited */}
-        // Windows can ignore SIGKILL while SQLite still owns the file. Kill the tree.
-        if(process.platform==='win32'&&child.pid)spawn('taskkill',['/PID',String(child.pid),'/T','/F'],{stdio:'ignore',windowsHide:true}).unref();
-      }
-      await Promise.race([exited,delay(2000)]);
+      await Promise.race([this.request('close',null).then(()=>undefined,()=>undefined),delay(1000)]);
+      if(child.exitCode===null&&child.signalCode===null&&pid)forceStop(pid);
+      await Promise.race([exited,delay(3000)]);
       child.unref();
       try{child.disconnect();}catch{/* the IPC channel is already gone */}
       if(this.child===child)this.child=undefined;
+      if(child.exitCode===null&&child.signalCode===null)throw Object.assign(new Error('SQLite process '+(pid??'')+' is still running'),{code:'DATABASE_WORKER_EXIT'});
     })();
   }
 }
