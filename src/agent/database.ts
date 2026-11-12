@@ -29,8 +29,17 @@ function workerFilename():string {
 }
 
 function canonical(filename:string):string {
-  const resolved=resolve(filename),directory=dirname(resolved),name=basename(resolved);
-  try{return join(realpathSync(directory),name);}catch{return resolved;}
+  const resolved=resolve(filename),name=basename(resolved),missing:string[]=[];
+  let directory=dirname(resolved);
+  while(!existsSync(directory)){
+    missing.push(basename(directory));
+    const parent=dirname(directory);
+    if(parent===directory)break;
+    directory=parent;
+  }
+  try{directory=realpathSync(directory);}catch{return resolved;}
+  for(const part of missing.reverse())directory=join(directory,part);
+  return join(directory,name);
 }
 function forceStop(pid:number){
   // taskkill /T runs before the process exits, so Windows children cannot keep the database open.
@@ -119,7 +128,13 @@ export class AgentDatabase {
   }
   private request(kind:'query'|'transaction',payload:unknown,attempt=0):Promise<unknown>{
     const pool=this.ensure(),id=++pool.sequence;
-    return new Promise((resolve,reject)=>{pool.pending.set(id,{resolve,reject});pool.child.ref();try{pool.child.send({id,kind,payload});}catch(error){pool.pending.delete(id);if(!pool.pending.size)pool.child.unref();const failed=error instanceof Error?error:new Error(String(error));if(attempt<1&&(failed as NodeJS.ErrnoException).code==='EPIPE'){pool.dead=true;if(pools.get(pool.key)===pool)pools.delete(pool.key);this.pool=undefined;resolve(this.request(kind,payload,attempt+1));return;}reject(failed);}});
+    return new Promise((resolve,reject)=>{
+      const timer=setTimeout(()=>{if(!pool.pending.has(id))return;pool.pending.delete(id);if(!pool.pending.size)pool.child.unref();reject(Object.assign(new Error('Database request timed out'),{code:'DATABASE_TIMEOUT'}));},30_000);
+      const finish=(ok:boolean,value:unknown)=>{clearTimeout(timer);ok?resolve(value):reject(value as Error);};
+      pool.pending.set(id,{resolve:value=>finish(true,value),reject:error=>finish(false,error)});pool.child.ref();
+      try{pool.child.send({id,kind,payload});}
+      catch(error){pool.pending.delete(id);clearTimeout(timer);if(!pool.pending.size)pool.child.unref();const failed=error instanceof Error?error:new Error(String(error));if(attempt<1&&(failed as NodeJS.ErrnoException).code==='EPIPE'){pool.dead=true;if(pools.get(pool.key)===pool)pools.delete(pool.key);this.pool=undefined;resolve(this.request(kind,payload,attempt+1));return;}reject(failed);}
+    });
   }
   async query<T=Record<string,unknown>>(sql:string,params:unknown[]=[]):Promise<T[]>{return await this.request('query',{sql,params}) as T[];}
   async transaction(statements:DatabaseStatement[]):Promise<DatabaseResult[]>{return await this.request('transaction',statements) as DatabaseResult[];}
