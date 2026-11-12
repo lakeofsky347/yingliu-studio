@@ -32,7 +32,7 @@ function handle({id,kind,payload}){
       try{current?.close();}catch(error){if(parentPort){post({id,error:{message:error instanceof Error?error.message:String(error),code:'DATABASE_ERROR'}});shutdown();return;}}
       try{post({id,value:null});}catch{/* the parent may already be gone */}
       if(parentPort){shutdown();return;}
-      process.exit(0);
+      // Stay alive until the parent kills the process. Exiting here drops the unlock acknowledgement and can fail the next write.
     }
     if(!database)throw Object.assign(new Error('Database has been closed'),{code:'DATABASE_CLOSED'});
     if(kind==='query')value=execute(payload).rows??[];
