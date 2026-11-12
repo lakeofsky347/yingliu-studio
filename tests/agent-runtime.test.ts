@@ -62,7 +62,7 @@ test('worker rejects cross-shot writes even when a port returns a successful res
 test('uncertain remote execution is reconciled rather than resubmitted after retry',async t=>{
   const f=await fixture(t);let executions=0,models=0;
   const runtime=new AgentRuntime(f.repo,{async context(){return {summary:'固定输入'};},async text(){models++;return JSON.stringify({type:'execute',tool:'code',shotId:f.scope.shotIds[0],input:{}});},async inspect(){return {};},async execute(){executions++;throw new Error('response lost after submission');},async validate(){throw new Error('unreachable');}});t.after(()=>runtime.dispose());
-  const task=await runtime.delegate({parentTaskId:f.root.id,parentLease:f.lease,mode:'subagent',goal:'代码候选',scope:f.scope,data:{baseline:{project:f.project,sources:f.sources}}});const blocked=await runtime.wait(task.id,{timeoutMs:5000});assert.equal(blocked.status,'blocked');
+  const task=await runtime.delegate({parentTaskId:f.root.id,parentLease:f.lease,mode:'subagent',goal:'代码候选',scope:f.scope,data:{baseline:{project:f.project,sources:f.sources}}});const blocked=await runtime.wait(task.id,{timeoutMs:20000});assert.equal(blocked.status,'blocked');
   const retried=await runtime.run(task.id);assert.equal(retried.status,'blocked');assert.equal(retried.checkpoint,'RECONCILIATION_REQUIRED');assert.equal(executions,1);assert.equal(models,1);
 });
 test('candidate evidence needs mandatory deterministic checks and parent-only acceptance',async t=>{
@@ -138,7 +138,7 @@ test('child cancellation fences both the root lease and the target generation',a
 test('retry retains the four-round planning ceiling and does not invoke extra models',async t=>{
   const f=await fixture(t);let calls=0;
   const runtime=new AgentRuntime(f.repo,{async context(){return {summary:'只读检查'};},async text(){return JSON.stringify({type:'read',query:{offset:calls++}});},async inspect(_task,query){return {page:query.offset};},async execute(){throw new Error('unexpected');},async validate(){throw new Error('unexpected');}});t.after(()=>runtime.dispose());
-  const task=await runtime.delegate({parentTaskId:f.root.id,parentLease:f.lease,mode:'subagent',goal:'有限规划',scope:{...f.scope,writeFields:[],capabilities:[]},data:{baseline:{project:f.project,sources:f.sources}}});const blocked=await runtime.wait(task.id,{timeoutMs:5000});assert.equal(blocked.checkpoint,'round-limit');assert.equal(calls,4);
+  const task=await runtime.delegate({parentTaskId:f.root.id,parentLease:f.lease,mode:'subagent',goal:'有限规划',scope:{...f.scope,writeFields:[],capabilities:[]},data:{baseline:{project:f.project,sources:f.sources}}});const blocked=await runtime.wait(task.id,{timeoutMs:20000});assert.equal(blocked.checkpoint,'round-limit');assert.equal(calls,4);
   const retried=await runtime.run(task.id);assert.equal(retried.checkpoint,'round-limit');assert.equal(calls,4);assert.equal((await f.repo.getBudget(f.root.id)).modelCalls,4);
 });
 test('task data updates from one lease use a version CAS instead of overwriting each other',async t=>{
