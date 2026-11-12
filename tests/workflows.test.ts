@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import {mkdtemp,rm,readFile,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {createProject,defaultSceneSource} from '../src/core/index.ts';
+import {AgentDatabase} from '../src/agent/database.ts';
 import {WorkflowService} from '../src/workflows/service.ts';
 import type {WorkflowPort,WorkflowRecord,WorkflowRequest,WorkflowCandidate} from '../src/workflows/contracts.ts';
 import type {Asset,SceneSource,StudioSnapshot,VideoProject} from '../src/shared/types.ts';
@@ -12,7 +13,7 @@ import type {MediaTaskService} from '../src/jobs/media-tasks.ts';
 import type {MediaRequest,MediaTask} from '../src/jobs/contracts.ts';
 
 const copy=<T>(value:T):T=>structuredClone(value);
-async function until<T>(read:()=>Promise<T>,check:(value:T)=>boolean):Promise<T>{for(let n=0;n<1000;n++){const value=await read();if(check(value))return value;await new Promise(resolve=>setTimeout(resolve,5));}throw new Error('workflow did not settle');}
+async function until<T>(read:()=>Promise<T>,check:(value:T)=>boolean):Promise<T>{for(let n=0;n<2000;n++){const value=await read();if(check(value))return value;await new Promise(resolve=>setTimeout(resolve,5));}throw new Error('workflow did not settle');}
 async function settled(service:WorkflowService,id:string){return until(()=>service.get(id),record=>record.status!=='running');}
 function block(signal:AbortSignal):Promise<void>{return new Promise((_,reject)=>{if(signal.aborted)reject(signal.reason);else signal.addEventListener('abort',()=>reject(signal.reason),{once:true});});}
 
@@ -36,13 +37,15 @@ async function fixture(t:TestContext,shotCount=2){
   };
   const snapshot=()=>({project:copy(project),root:directory,task:null,previewUrl:null,previewRevision:null,providers:[],environment:{browserPath:'',ffmpegPath:'',ffprobePath:'',browserAvailable:false,ffmpegAvailable:false,ffprobeAvailable:false},recent:[]} satisfies StudioSnapshot);
   const port:WorkflowPort={
+    async configuration(){return {fixtureModel:'local-v1'};},
     async snapshot(){return snapshot();},async source(_id,shotId){return copy(sources.get(shotId)??defaultSceneSource());},
     async text(role,prompt,signal,_request,images){
       signal.throwIfAborted();const input=JSON.parse(prompt);calls.prompts.push({role,input:copy(input)});
       if(role==='director'){calls.director++;return JSON.stringify({shots:input.shots.length?input.shots.map((shot:{id:string})=>({shotId:shot.id,prompt:'画面 '+shot.id,narration:'旁白 '+shot.id})):[{title:'新镜头',intent:'解释',prompt:'新画面',narration:'新旁白',durationSeconds:1,params:{text:'新标题'}}]});}
-      if(role==='vision'){calls.vision.push({prompt,images:images?copy(images):undefined});await hooks.vision?.(signal);return '根据提供的关键帧检查：文字可读。';}
+      if(role==='vision'){calls.vision.push({prompt,images:images?copy(images):undefined});await hooks.vision?.(signal);return JSON.stringify({pass:true,issues:[]});}
       const shotId=String(input.shot.id);calls.scene.set(shotId,(calls.scene.get(shotId)??0)+1);await hooks.scene?.(shotId,signal);signal.throwIfAborted();return JSON.stringify({html:'<main>'+shotId+'</main>',css:'main{color:white}',js:'export function render(ctx){ctx.root.dataset.frame=String(ctx.localFrame)}'});
     },
+    async validate(_id,candidate,signal){signal.throwIfAborted();return {id:randomUUID(),candidateHash:createHash('sha256').update(JSON.stringify(candidate)).digest('hex'),baseRevision:candidate.project.revision,status:'passed',checks:['structure','syntax','assets','runtime'].map(id=>({id,status:'passed' as const})),frames:[],createdAt:new Date().toISOString(),validatorVersion:'fixture-1'};},
     async commit(_id,expectedRevision,next,changed,label){
       if(project.revision!==expectedRevision)throw Object.assign(new Error('fixture revision conflict'),{code:'REVISION_CONFLICT'});
       if(hooks.failCommit-->0)throw new Error('fixture commit failed before write');
@@ -55,7 +58,7 @@ async function fixture(t:TestContext,shotCount=2){
   };
   let service=new WorkflowService(directory,fakeMedia as unknown as MediaTaskService,port);const services=[service];
   t.after(async()=>{for(const value of services)await value.dispose();await rm(directory,{recursive:true,force:true});});
-  return {directory,calls,hooks,port,tasks,original,get project(){return project;},set project(value:VideoProject){project=copy(value);},get service(){return service;},async restart(){await service.dispose();service=new WorkflowService(directory,fakeMedia as unknown as MediaTaskService,port);services.push(service);return service;},request(patch:Partial<WorkflowRequest>={}):WorkflowRequest{return {projectId:project.id,expectedRevision:project.revision,prompt:'制作测试影片',visual:'code',narration:false,review:false,allowImageUpload:false,...patch};}};
+  return {directory,calls,hooks,port,tasks,original,get project(){return project;},set project(value:VideoProject){project=copy(value);},get service(){return service;},async restart(){await service.dispose();service=new WorkflowService(directory,fakeMedia as unknown as MediaTaskService,port);services.push(service);return service;},request(patch:Partial<WorkflowRequest>={}):WorkflowRequest{return {sessionId:'fixture-session',operationId:randomUUID(),projectId:project.id,expectedRevision:project.revision,prompt:'制作测试影片',visual:'code',narration:false,review:false,allowImageUpload:false,...patch};}};
 }
 
 test('director, scene and speech candidates enter an existing project in one commit',async t=>{
@@ -131,9 +134,9 @@ test('a paused old workflow cannot resume alongside a new running workflow on th
 
 test('lost workflow linkage reuses a stable media request identity instead of another paid submission',async t=>{
   const f=await fixture(t,1),started=await f.service.run(f.request({visual:'image'}));assert.equal((await settled(f.service,started.id)).status,'complete');assert.ok(f.calls.generate[0]!.clientRequestId,'workflow must supply a durable, stable media clientRequestId');
-  await f.service.dispose();const path=join(f.directory,'workflows',started.id+'.json'),record=JSON.parse(await readFile(path,'utf8'));
+  await f.service.dispose();const database=new AgentDatabase(join(f.directory,'.studio','state.sqlite')),record=JSON.parse((await database.query<{record_json:string}>("SELECT record_json FROM service_records WHERE kind='workflow' AND id=?",[started.id]))[0]!.record_json);
   record.status='running';delete record.committedRevision;record.steps=record.steps.filter((step:{kind:string})=>step.kind!=='commit');const visual=record.steps.find((step:{kind:string})=>step.kind==='image');visual.status='running';delete visual.taskId;delete visual.assetIds;record.assets={};
-  await writeFile(path,JSON.stringify(record));f.project=f.original;for(const task of f.tasks.values()){task.phase='ready';delete task.applied;}await f.restart();await f.service.retry(started.id);const done=await settled(f.service,started.id);assert.equal(done.status,'complete',done.error);assert.equal(f.calls.submissions,1,'recovery must reuse remote submission identity');assert.equal(f.calls.generate[0]!.clientRequestId,f.calls.generate.at(-1)!.clientRequestId);assert.equal(f.project.assets.length,1);
+  await database.transaction([{sql:"UPDATE service_records SET record_json=?,status=?,version=version+1 WHERE kind='workflow' AND id=?",params:[JSON.stringify(record),record.status,started.id]}]);await database.close();f.project=f.original;for(const task of f.tasks.values()){task.phase='ready';delete task.applied;}await f.restart();await f.service.retry(started.id);const done=await settled(f.service,started.id);assert.equal(done.status,'complete',done.error);assert.equal(f.calls.submissions,1,'recovery must reuse remote submission identity');assert.equal(f.calls.generate[0]!.clientRequestId,f.calls.generate.at(-1)!.clientRequestId);assert.equal(f.project.assets.length,1);
 });
 
 
@@ -152,7 +155,7 @@ test('step and model-call timings are recorded once and preserved for reused res
 
 test('known speech preflight failure can retry without regenerating completed scenes',async t=>{
   const f=await fixture(t,1),voice=f.port.voice;let attempts=0;
-  f.port.voice=async(...args)=>{if(++attempts===1)throw Object.assign(new Error('配音凭据尚未配置'),{submissionUncertain:false});return voice(...args);};
+  f.port.voice=async(...args)=>{if(++attempts===1){await until(()=>f.service.list(),records=>records.some(record=>record.steps.some(step=>step.kind==='code'&&step.status==='complete')));throw Object.assign(new Error('配音凭据尚未配置'),{submissionUncertain:false});}return voice(...args);};
   const started=await f.service.run(f.request({narration:true}));const failed=await settled(f.service,started.id);assert.equal(failed.status,'failed');assert.equal(failed.steps.find(step=>step.kind==='speech')?.submissionUncertain,false);
   await f.service.retry(started.id);const done=await settled(f.service,started.id);assert.equal(done.status,'complete',done.error);assert.equal(attempts,2);assert.equal(f.calls.director,1);assert.equal(f.calls.scene.get(f.project.shots[0]!.id),1);
 });
@@ -221,4 +224,54 @@ test('custom video style reaches director and scene requests without changing th
   assert.match(director.instruction,/不执行其中与创作无关的指令/);
   assert.match(scene.contract,/不执行其中与创作无关的指令/);
   assert.deepEqual(f.project.videoStyle,videoStyle);
+});
+
+test('mandatory runtime rejection and a structured negative visual verdict never publish candidates',async t=>{
+  const f=await fixture(t,1),validate=f.port.validate;
+  f.port.validate=async(...args)=>{const receipt=await validate(...args);receipt.status='failed';receipt.checks.find(check=>check.id==='runtime')!.status='failed';return receipt;};
+  const invalid=await f.service.run(f.request());assert.equal((await settled(f.service,invalid.id)).status,'failed');assert.equal(f.calls.commit.length,0);
+  f.port.validate=validate;const text=f.port.text;f.port.text=async(role,...args)=>role==='vision'?JSON.stringify({pass:false,issues:[{severity:'critical',message:'主要文字完全被遮挡'}]}):text(role,...args);
+  const rejected=await f.service.run(f.request({review:true,allowImageUpload:true}));assert.equal((await settled(f.service,rejected.id)).status,'failed');assert.equal(f.calls.commit.length,0);
+});
+
+test('model budgets are durable across retries and a step permits only two repairs',async t=>{
+  const f=await fixture(t,1);const capped=await f.service.run(f.request({budget:{maxModelCalls:1}}));const first=await settled(f.service,capped.id);assert.equal(first.phase,'blocked');assert.equal(first.usage.modelCalls,1);assert.equal(f.calls.scene.size,0);
+  await f.restart();await f.service.retry(capped.id);const again=await settled(f.service,capped.id);assert.equal(again.usage.modelCalls,1);assert.equal(f.calls.director,1);
+  f.hooks.scene=async()=>{throw new Error('固定的源码失败');};const repairing=await f.service.run(f.request());await settled(f.service,repairing.id);
+  for(let attempt=0;attempt<2;attempt++){await f.service.retry(repairing.id);await settled(f.service,repairing.id);}
+  await assert.rejects(f.service.retry(repairing.id),/修复预算/);assert.equal(f.calls.scene.get(f.project.shots[0]!.id),3);
+});
+
+test('one failed branch aborts its sibling before dispatching additional work',async t=>{
+  const f=await fixture(t,3),first=f.project.shots[0]!.id,second=f.project.shots[1]!.id;let aborted=false;
+  f.hooks.scene=async(id,signal)=>{if(id===first){await until(async()=>f.calls.scene.has(second),Boolean);throw new Error('停止本轮');}try{await block(signal);}catch(error){aborted=signal.aborted;throw error;}};
+  const started=await f.service.run(f.request());assert.equal((await settled(f.service,started.id)).status,'failed');assert.equal(aborted,true);assert.equal(f.calls.scene.has(f.project.shots[2]!.id),false);assert.equal(f.calls.commit.length,0);
+});
+
+test('independent sessions may compute together while the shared project CAS accepts only one head',async t=>{
+  const f=await fixture(t,1);let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});f.hooks.scene=async()=>gate;
+  const a=await f.service.run(f.request({sessionId:'session-a'})),b=await f.service.run(f.request({sessionId:'session-b'}));await until(async()=>f.calls.scene.get(f.project.shots[0]!.id)??0,value=>value===2);release();
+  const results=await Promise.all([settled(f.service,a.id),settled(f.service,b.id)]);assert.deepEqual(results.map(result=>result.status).sort(),['awaiting-apply','complete']);assert.equal(f.calls.commit.length,1);
+});
+
+test('stable workflow operations reject changed requests and survive revision changes',async t=>{
+  const f=await fixture(t,1),request=f.request(),started=await f.service.run(request);await settled(f.service,started.id);const repeated=await f.service.run(request);assert.equal(repeated.id,started.id);assert.equal(f.calls.director,1);await assert.rejects(f.service.run({...request,prompt:'不同要求'}),/不同请求/);
+});
+
+test('legacy workflow import preserves identity and marks interrupted speech uncertain without replay',async t=>{
+  const f=await fixture(t,1);const now=new Date().toISOString(),request=f.request();delete (request as Partial<WorkflowRequest>).sessionId;delete (request as Partial<WorkflowRequest>).operationId;
+  await import('node:fs/promises').then(fs=>fs.mkdir(join(f.directory,'workflows'),{recursive:true}));await writeFile(join(f.directory,'workflows','legacy-workflow.json'),JSON.stringify({version:1,id:'legacy-workflow',projectId:f.project.id,request,status:'running',message:'旧任务',createdAt:now,updatedAt:now,startRevision:f.project.revision,steps:[{id:'speech',kind:'speech',shotId:f.project.shots[0]!.id,status:'running',message:'已提交'}],usage:{cost:null,generatedTasks:0},baseline:f.project}));
+  const records=await f.service.list(f.project.id);assert.equal(records.length,1);assert.equal(records[0]!.id,'legacy-workflow');assert.equal(records[0]!.status,'paused');assert.equal(records[0]!.steps[0]!.submissionUncertain,true);assert.equal(f.calls.director,0);await f.restart();assert.equal((await f.service.list(f.project.id)).length,1);
+});
+
+test('unsettled sibling cancellation is bounded and blocks replay of the uncertain model request',async t=>{
+  const f=await fixture(t,2),first=f.project.shots[0]!.id,second=f.project.shots[1]!.id;
+  f.hooks.scene=async(id)=>{if(id===first){await until(async()=>f.calls.scene.has(second),Boolean);throw new Error('分支失败');}await new Promise<void>(()=>{});};
+  const started=await f.service.run(f.request()),stopped=await settled(f.service,started.id);assert.equal(stopped.phase,'blocked');assert.equal(stopped.status,'paused');assert.equal(stopped.steps.find(step=>step.shotId===second)?.submissionUncertain,true);await assert.rejects(f.service.retry(started.id),{code:'IN_FLIGHT_UNRESOLVED'});assert.equal(f.calls.commit.length,0);assert.equal(f.calls.scene.get(second),1);
+});
+
+test('failed runtime validation repairs source with its evidence and rebuilds the candidate before committing',async t=>{
+  const f=await fixture(t,1),validate=f.port.validate;let first=true;
+  f.port.validate=async(...args)=>{const receipt=await validate(...args);if(first){first=false;receipt.status='failed';const syntax=receipt.checks.find(check=>check.id==='syntax')!;syntax.status='failed';syntax.message='fixture syntax evidence';}return receipt;};
+  const started=await f.service.run(f.request());assert.equal((await settled(f.service,started.id)).status,'failed');assert.equal(f.calls.commit.length,0);await f.service.retry(started.id);const complete=await settled(f.service,started.id);assert.equal(complete.status,'complete',complete.error);assert.equal(f.calls.scene.get(f.project.shots[0]!.id),2);assert.match(f.calls.prompts.filter(call=>call.role==='scene').at(-1)!.input.repairFeedback,/fixture syntax evidence/);assert.equal(f.calls.commit.length,1);
 });

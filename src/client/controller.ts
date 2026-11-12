@@ -1,11 +1,13 @@
 import type { ModelRoute, SceneSource, StudioApi, StudioSnapshot, VideoProject, VideoStyle } from '../shared/types.ts';
 
 import { SourceDraftStore, type SourceDraft } from './source-drafts.ts';
+import { PendingOperationRequests } from './agent-client.ts';
+import type { AgentSession } from '../agent/contracts.ts';
 
 export interface ProjectHistory {canUndo:boolean;canRedo:boolean;entries:{id:string;label:string;createdAt:string;revision:number}[];cursor:number}
 export interface StudioState {
   snapshot:StudioSnapshot|null;loading:boolean;pending:boolean;saving:boolean;dirty:boolean;sourceDraft:boolean;sourceDraftCount:number;draftSerial:number;conflict:boolean;styles:VideoStyle[];
-  error:string;notice:string;scheme:'light'|'dark';selected:string|null;route:ModelRoute;
+  agentSessionId:string|null;error:string;notice:string;scheme:'light'|'dark';selected:string|null;route:ModelRoute;
   canUndo:boolean;canRedo:boolean;history:ProjectHistory|null;localImages:Record<string,string>;focusFrame:number|null;focusSerial:number;
 }
 export interface YingliuBridge {
@@ -36,7 +38,7 @@ export class StandaloneStudioApi implements StudioApi {
 }
 /** One owner for edits, persisted history, revision checks, and project task polling. */
 export class StudioController {
-  private state:StudioState={snapshot:null,loading:true,pending:false,saving:false,dirty:false,sourceDraft:false,sourceDraftCount:0,draftSerial:0,conflict:false,styles:[],error:'',notice:'',scheme:'dark',selected:null,route:{provider:'',model:''},canUndo:false,canRedo:false,history:null,localImages:{},focusFrame:null,focusSerial:0};
+  private state:StudioState={snapshot:null,loading:true,pending:false,saving:false,dirty:false,sourceDraft:false,sourceDraftCount:0,draftSerial:0,conflict:false,styles:[],agentSessionId:null,error:'',notice:'',scheme:'dark',selected:null,route:{provider:'',model:''},canUndo:false,canRedo:false,history:null,localImages:{},focusFrame:null,focusSerial:0};
   private listeners=new Set<()=>void>();private disposed=false;
   private saveTimer:ReturnType<typeof setTimeout>|undefined;private pollTimer:ReturnType<typeof setTimeout>|undefined;
   private sourceDraftDirty=false;
@@ -44,6 +46,8 @@ export class StudioController {
   private polling=false;private actionEpoch=0;private snapshotReadSerial=0;private serverRevision:number|null=null;private serverProjectId:string|null=null;
   private creativeHandler:((kind:'storyboard'|'scenes'|'modify',instruction:string,shotId?:string)=>Promise<void>)|null=null;
   private readonly drafts:SourceDraftStore;
+  private readonly operations=new PendingOperationRequests();
+  private readonly agentSessions=new Map<string,Promise<AgentSession>>();
   constructor(readonly api:StudioApi,drafts?:SourceDraftStore){this.drafts=drafts??new SourceDraftStore();}
   getSnapshot=():StudioState=>this.state;
   subscribe=(fn:()=>void):(()=>void)=>{this.listeners.add(fn);return()=>{this.listeners.delete(fn);};};
@@ -56,7 +60,7 @@ export class StudioController {
     if(!keepProject||ownSave){this.serverProjectId=snapshot.project?.id??null;this.serverRevision=snapshot.project?.revision??null;}
     if(ownSave&&same&&snapshot.project&&previousRevision!==null)for(const draft of this.drafts.list(snapshot.project.id)){if(draft.baseRevision===previousRevision)this.drafts.set({...draft,baseRevision:snapshot.project.revision});}
     const project=keepProject?previous:snapshot.project,changed=project?.id!==previous?.id;
-    if(changed){this.dirty=false;this.update({history:null,canUndo:false,canRedo:false,localImages:{}});}
+    if(changed){this.dirty=false;this.update({history:null,canUndo:false,canRedo:false,localImages:{},agentSessionId:null});}
     const route=this.state.route;
     const available=snapshot.providers.filter(provider=>provider.id!=='demo');
     const provider=available.find(p=>p.id===route.provider)||available.find(p=>p.models.length);
@@ -99,6 +103,21 @@ export class StudioController {
   discardSourceDraft(shotId:string,projectId=this.state.snapshot?.project?.id):void{if(!projectId)return;this.drafts.delete(projectId,shotId);this.update({...this.draftState(),...(!this.dirty?{conflict:false,error:''}:{}),notice:'源码草稿已丢弃，已保存源码保持原样。'});}
   persistDrafts():void{this.drafts.persist();if(this.drafts.warning)this.update({notice:this.drafts.warning});}
   get confirmedRevision():number|null{return this.serverRevision;}
+  setAgentSession(sessionId:string|null):void{this.update({agentSessionId:sessionId});}
+  async ensureAgentSession():Promise<string>{
+    if(this.state.agentSessionId)return this.state.agentSessionId;
+    const projectId=this.state.snapshot?.project?.id,key=projectId??'';
+    let request=this.agentSessions.get(key);
+    if(!request){request=this.api.call<AgentSession>('sessions.create',{projectId,name:'创作对话'});this.agentSessions.set(key,request);}
+    try{const session=await request;if(this.state.snapshot?.project?.id===projectId)this.setAgentSession(session.id);return session.id;}
+    finally{this.agentSessions.delete(key);}
+  }
+  /** An unresolved transport response keeps the original operation identity and revision. */
+  async mutation<T>(endpoint:string,payload:Record<string,unknown>):Promise<T>{
+    const request=this.operations.prepare(endpoint,payload);
+    if(endpoint==='media.generate'&&!request.payload.clientRequestId)request.payload.clientRequestId=request.payload.operationId;
+    const result=await this.api.call<T>(endpoint,request.payload);this.operations.complete(request.key);return result;
+  }
   get hasBlockingChanges():boolean{return this.dirty||this.sourceDraftDirty;}
   setRoute=(route:ModelRoute):void=>this.update({route});clearError=():void=>{if(!this.state.conflict)this.update({error:''});};notify=(notice:string):void=>this.update({notice});
   setCreativeHandler(handler:typeof this.creativeHandler):void{this.creativeHandler=handler;}
@@ -117,8 +136,8 @@ export class StudioController {
     const project=this.state.snapshot?.project;if(!project||!this.dirty||this.state.conflict)return;
     const serial=this.editSerial;this.saveFailed=false;
     const operation=(async()=>{try{
-      const expectedRevision=this.serverProjectId===project.id?this.serverRevision:undefined;
-      const snapshot=await this.api.call<StudioSnapshot>('save',{project,expectedRevision});
+      const expectedRevision=this.serverProjectId===project.id?this.serverRevision:null;
+      const snapshot=await this.mutation<StudioSnapshot>('save',{project,expectedRevision});
       if(serial===this.editSerial){this.dirty=false;this.accept(snapshot,false,true);this.update({saving:false,dirty:false,error:'',conflict:false});}
       else{this.accept(snapshot,true,true);this.update({error:''});}
       await this.refreshHistory();
@@ -131,9 +150,10 @@ export class StudioController {
     try{
       await this.flush();if(this.sourceDraftDirty&&!['saveSource','restoreSource','reveal','environment','cancel'].includes(endpoint))throw new Error('前端源码尚未保存，请先在源码面板保存修改。');if(this.dirty)throw new Error(this.state.error||'项目尚未保存，请重试保存。');
       if(this.state.sourceDraft&&['preview','export','generate','retry','undo','redo'].includes(endpoint))throw new Error('本工程有源码草稿，请保存或丢弃草稿后再执行此操作。切换面板会保留草稿。');
-      const guard=['saveSource','restoreSource','apply','rename','undo','redo','retry'].includes(endpoint)?{expectedRevision:this.serverRevision}:{};
-      const request=['create','open','focus'].includes(endpoint)?payload:{projectId:this.state.snapshot?.project?.id,...guard,...payload as object};
-      const snapshot=await this.api.call<StudioSnapshot>(endpoint,request);this.accept(snapshot,false,['saveSource','restoreSource','import','rename'].includes(endpoint));await this.refreshHistory();this.update({notice,conflict:false,error:''});return true;
+      const writes=['create','saveSource','restoreSource','apply','rename','undo','redo','retry','import','audio','bindSession','generate','duplicate','archive'].includes(endpoint);
+      const request={...(!['create','open','focus'].includes(endpoint)?{projectId:this.state.snapshot?.project?.id}:{}),...(writes?{expectedRevision:endpoint==='create'?null:this.serverRevision}:{}),...(endpoint==='cancel'?{expectedTaskId:this.state.snapshot?.task?.id}:{}),...payload as object};
+      if(endpoint==='cancel'&&!request.expectedTaskId)throw new Error('没有可取消的任务，请刷新任务状态。');
+      const snapshot=await (writes?this.mutation<StudioSnapshot>(endpoint,request):this.api.call<StudioSnapshot>(endpoint,request));this.accept(snapshot,false,['saveSource','restoreSource','import','rename'].includes(endpoint));await this.refreshHistory();this.update({notice,conflict:false,error:''});return true;
     }catch(error){this.update({error:message(error)});return false;}finally{this.update({pending:false});}
   }
   /** Background workflow refreshes never follow another project's global selection. */
@@ -155,7 +175,8 @@ export class StudioController {
     try{
       if(prepares){await this.flush();if(this.dirty||this.state.sourceDraft)throw new Error(this.state.error||'工程或源码草稿尚未保存，请保存后继续。');}
       if(this.state.snapshot?.project?.id!==projectId)throw new Error('工程已切换，请重新发起操作');
-      const result=await this.api.call<T>(endpoint,{...payload,projectId,...(prepares?{expectedRevision:this.serverRevision}:{})});
+      const sessionId=endpoint.startsWith('workflows.')?(typeof payload.sessionId==='string'?payload.sessionId:await this.ensureAgentSession()):undefined;
+      const result=await this.mutation<T>(endpoint,{...payload,projectId,...(sessionId?{sessionId}:{}),...(prepares?{expectedRevision:this.serverRevision}:{})});
       if(refreshProject){const snapshot=await this.api.call<StudioSnapshot>('current',{projectId});if(snapshot.project?.id!==projectId)throw new Error('工程刷新结果不匹配');this.accept(snapshot,true,true);await this.refreshHistory();}
       this.update({notice:'',...(!this.state.conflict?{error:''}:{})});return result;
     }catch(error){this.update({error:message(error)});throw error;}finally{this.update({pending:false});}
