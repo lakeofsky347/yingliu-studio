@@ -1,7 +1,7 @@
 {
   "name": "yingliu-studio",
   "productName": "映流 Studio",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "main": "dist/desktop/main.cjs",

@@ -44,6 +44,14 @@ export class AgentDatabase {
   async transaction(statements:DatabaseStatement[]):Promise<DatabaseResult[]>{return await this.request('transaction',statements) as DatabaseResult[];}
   close():Promise<void>{
     if(this.closing)return this.closing;this.closed=true;
-    return this.closing=(async()=>{if(!this.worker)return;const worker=this.worker;try{await this.request('close',null);}finally{await worker.terminate();if(this.worker===worker)this.worker=undefined;}})();
+    return this.closing=(async()=>{
+      const worker=this.worker;if(!worker)return;
+      const exited=new Promise<void>(resolve=>{worker.once('exit',()=>resolve());});
+      try{await this.request('close',null);}catch{/* the worker may already have exited */}
+      const finished=await Promise.race([exited.then(()=>true),new Promise<boolean>(resolve=>setTimeout(()=>resolve(false),2000))]);
+      if(!finished)await worker.terminate();
+      await exited;
+      if(this.worker===worker)this.worker=undefined;
+    })();
   }
 }

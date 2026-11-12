@@ -5,6 +5,7 @@ import { defaultSceneSource, defaultShot, normalizeSceneDurations } from '../cor
 import type { SceneSource, Shot, VideoProject } from '../shared/types.ts';
 import type { ProviderConfig, ProviderHost, ProviderSettings, SecretStore } from './contracts.ts';
 import { inspectCredential, updateCredential } from './secrets.ts';
+import { checkTemplate } from '../models/adapters/template.ts';
 import { ModelRegistry } from '../models/registry.ts';
 import { imageMetadata } from '../models/image-input.ts';
 import type { ModelDefinition, ModelSelection, ResolvedModel } from '../models/contracts.ts';
@@ -84,7 +85,8 @@ export class ProviderManager {
     await this.initialize();if(this.mode==='demo')return {ok:true,message:'离线演示模型可用；这是确定性演示，未连接远程模型。'};
     const state=await this.registry.list(),connection=connectionId?state.connections.find(c=>c.id===connectionId):(await this.registry.resolve('director')).connection;
     if(!connection)return {ok:false,message:'模型连接不存在'};let key:string|undefined;
-    try{key=await this.registry.credential(connection);const response=await (this.options.fetch??fetch)(connection.baseUrl+'/models',{headers:key?{Authorization:`Bearer ${key}`}:{},signal:AbortSignal.timeout(15000)});
+    try{key=await this.registry.credential(connection);
+      if(connection.protocol==='async-task'){const result=await checkTemplate({connection,key,signal:AbortSignal.timeout(15000),fetch:this.options.fetch},state.models.find(m=>m.connectionId===connection.id));return {ok:result.ok,message:key?result.message.split(key).join('[redacted]'):result.message};}const response=await (this.options.fetch??fetch)(connection.baseUrl+'/models',{headers:key?{Authorization:`Bearer ${key}`}:{},signal:AbortSignal.timeout(15000)});
       if(!response.ok)return {ok:false,message:`模型目录检查失败（HTTP ${response.status}）；真实创作仍为 NOT_CHECKED。`};
       const value=object(await response.json()),models=Array.isArray(value.data)?value.data.map(x=>object(x).id):[],configured=state.models.filter(m=>m.connectionId===connection.id);
       return configured.every(model=>models.includes(model.model))?{ok:true,message:'服务可访问，所选模型在目录中；此检查未执行真实创作，真实创作为 NOT_CHECKED。'}:{ok:true,message:'服务可访问；模型目录未确认所选名称，真实创作为 NOT_CHECKED。'};

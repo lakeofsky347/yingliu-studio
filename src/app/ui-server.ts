@@ -13,6 +13,15 @@ export async function startUiServer(application:Application,uiDirectory:string,p
       const url=new URL(req.url??'/',origin);
       res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
       res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: http://localhost:*; media-src 'self' http://localhost:*; frame-src http://localhost:*; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'");
+      if(url.pathname==='/events/agent'){
+        // Server-sent events for agent runs. POST + token header (EventSource cannot send headers); same origin checks as /api.
+        if(req.method!=='POST'||req.headers['x-yingliu-token']!==token||req.headers.origin&&req.headers.origin!==origin){res.writeHead(403);res.end();return;}
+        const projectId=url.searchParams.get('projectId');
+        res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Connection':'keep-alive'});res.write(': ok\n\n');
+        const unsubscribe=application.agent.subscribe(event=>{if(event.type==='run'&&projectId&&event.run.projectId!==projectId)return;res.write('event: '+event.type+'\ndata: '+JSON.stringify(event)+'\n\n');});
+        const heartbeat=setInterval(()=>res.write(': ping\n\n'),15000);
+        req.on('close',()=>{clearInterval(heartbeat);unsubscribe();});return;
+      }
       if(url.pathname.startsWith('/api/')){
         if(req.method!=='POST'||req.headers['x-yingliu-token']!==token||req.headers.origin&&req.headers.origin!==origin){res.writeHead(403);res.end();return;}
         const parts:Buffer[]=[];let size=0;

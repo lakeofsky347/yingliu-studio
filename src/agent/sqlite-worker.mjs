@@ -22,7 +22,7 @@ function execute(input){
 parentPort.on('message',({id,kind,payload})=>{
   try{
     let value;
-    if(kind==='close'){database.close();parentPort.postMessage({id,value:null});parentPort.close();return;}
+    if(kind==='close'){try{database.close();}catch(error){parentPort.postMessage({id,error:{message:error instanceof Error?error.message:String(error),code:'DATABASE_ERROR'}});parentPort.close();return;}parentPort.postMessage({id,value:null});parentPort.close();return;}
     if(kind==='query')value=execute(payload).rows??[];
     else if(kind==='transaction'){
       if(!Array.isArray(payload))throw new Error('Invalid transaction');

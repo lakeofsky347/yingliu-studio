@@ -2,8 +2,23 @@ import {createHash,randomUUID} from 'node:crypto';
 import {mkdir,readFile,readdir,stat,realpath} from 'node:fs/promises';
 import {createReadStream} from 'node:fs';
 import {join,resolve,sep,dirname} from 'node:path';
-import {cancelVideo,generateImage,getVideo,lookupVideo,submitVideo,type AdapterContext,type AdapterInput} from '../models/adapters/media.ts';
+import {cancelVideo as gatewayCancel,generateImage as openaiImage,getVideo as gatewayGet,lookupVideo as gatewayLookup,submitVideo as gatewaySubmit,type AdapterContext,type AdapterInput} from '../models/adapters/media.ts';
+import {cancelTemplate,pollTemplate,submitTemplate} from '../models/adapters/template.ts';
 import {DurableServiceRecords,requestHash} from './durable-records.ts';
+import type {RemoteJob as Job} from './contracts.ts';
+// Protocol dispatch: images / video-gateway keep their native adapters; async-task uses the configurable template adapter.
+const outputOf=(operation:string):'image'|'video'=>operation==='text-to-image'?'image':'video';
+async function generateImage(context:AdapterContext,input:AdapterInput):Promise<Job>{return context.connection.protocol==='async-task'?submitAsync(context,input):openaiImage(context,input);}
+async function submitVideo(context:AdapterContext,input:AdapterInput):Promise<Job>{return context.connection.protocol==='async-task'?submitAsync(context,input):gatewaySubmit(context,input);}
+async function submitAsync(context:AdapterContext,input:AdapterInput):Promise<Job>{
+  const result=await submitTemplate(context,{clientRequestId:input.clientRequestId,model:input.model,prompt:input.prompt,image:input.inputs[0]?.dataUrl,duration:typeof input.parameters.duration==='number'?input.parameters.duration:undefined,parameters:input.parameters},outputOf(input.operation));
+  if('kind' in result)return {jobId:input.clientRequestId,status:'succeeded',artifacts:[{base64:Buffer.from(result.bytes).toString('base64'),mimeType:result.mimeType}]};
+  return result;
+}
+type TaskContext=AdapterContext&{model?:import('../models/contracts.ts').ModelDefinition;operation?:string};
+async function getVideo(context:AdapterContext,jobId:string):Promise<Job>{return context.connection.protocol==='async-task'?pollTemplate(context,(context as TaskContext).model!,jobId,outputOf((context as TaskContext).operation??'text-to-video')):gatewayGet(context,jobId);}
+async function lookupVideo(context:AdapterContext,clientRequestId:string):Promise<Job|null>{return context.connection.protocol==='async-task'?null:gatewayLookup(context,clientRequestId);}
+async function cancelVideo(context:AdapterContext,jobId:string):Promise<Job>{return context.connection.protocol==='async-task'?cancelTemplate(context,(context as TaskContext).model!,jobId):gatewayCancel(context,jobId);}
 import {downloadArtifact,mediaSignature} from './download.ts';
 import type {MediaTask,MediaRequest,MediaRegistryPort,MediaProjectPort,MediaTaskOptions,RemoteJob} from './contracts.ts';
 
@@ -53,7 +68,7 @@ export class MediaTaskService {
     if(input.shotId&&!project.shotIds.includes(input.shotId))throw new Error('生成目标镜头不存在');
     const resolved=await this.registry.resolve({role:input.operation==='text-to-image'?'image':'video',...(input.modelId?{modelId:input.modelId}:{}),...(input.connectionId?{connectionId:input.connectionId}:{})});
     const release=this.registry.acquire?.(resolved.connection.id,resolved.model.id);try {
-    const output=input.operation==='text-to-image'?'image':'video';if(resolved.connection.protocol!==(output==='image'?'images':'video-gateway')||!resolved.model.outputModalities.includes(output))throw new Error('所选模型不支持此生成操作');
+    const output=input.operation==='text-to-image'?'image':'video';if(![output==='image'?'images':'video-gateway','async-task'].includes(resolved.connection.protocol)||!resolved.model.outputModalities.includes(output))throw new Error('所选模型不支持此生成操作');
     if(!resolved.model.inputModalities.includes('text'))throw new Error('所选模型不支持文字提示输入');
     if(input.operation==='image-to-video'&&!resolved.model.inputModalities.includes('image'))throw new Error('所选模型不支持图片输入');
     // Resolve now to reject unavailable credentials before registering work. Resolve again per HTTP operation.
@@ -86,7 +101,7 @@ export class MediaTaskService {
     active.promise=(async()=>{const entry=await this.ledger.claim(task.id,task.projectId,{connectionId:task.connection.id,connectionLimit:Math.max(1,task.connection.concurrency??2),maxConcurrent:this.options.maxConcurrent??4});if(!entry)return;active.generation=entry.generation;this.tasks.set(task.id,entry.value);const heartbeat=setInterval(()=>{void this.ledger.renew(task.id,task.projectId,entry.generation).then(stopped=>{if(stopped)controller.abort(new Error('任务收到停止请求'));}).catch(error=>controller.abort(error));},5000);heartbeat.unref();
       try{if(entry.value.observation==='active'&&!terminal.has(entry.value.phase)&&!['ready','applying','unknown'].includes(entry.value.phase))await this.run(entry.value,controller.signal);}finally{clearInterval(heartbeat);await this.ledger.release(task.id,task.projectId,entry.generation);}})().finally(()=>{this.running.delete(task.id);if(!this.stopped&&!this.reschedule){this.reschedule=setTimeout(()=>{this.reschedule=undefined;void this.list().then(()=>this.schedule());},100);this.reschedule.unref();}});void active.promise.catch(()=>{});
   }}
-  private async context(task:MediaTask,signal:AbortSignal):Promise<AdapterContext>{const active=this.running.get(task.id);if(active?.generation!==undefined)await this.ledger.assertLease(task.id,task.projectId,active.generation);const max=this.options.maxObservationMs??1200000,elapsed=task.remotePhaseStartedAt?Date.now()-Date.parse(task.remotePhaseStartedAt):0;if(elapsed>=max)throw Object.assign(new Error('远程阶段观察已达到上限，已暂停且保留原请求'),{code:'OBSERVATION_TIMEOUT'});return {connection:task.connection,key:await this.registry.credential(task.connection),signal:AbortSignal.any([signal,AbortSignal.timeout(Math.max(1,max-elapsed))]),fetch:this.options.fetch};}
+  private async context(task:MediaTask,signal:AbortSignal):Promise<TaskContext>{const active=this.running.get(task.id);if(active?.generation!==undefined)await this.ledger.assertLease(task.id,task.projectId,active.generation);const max=this.options.maxObservationMs??1200000,elapsed=task.remotePhaseStartedAt?Date.now()-Date.parse(task.remotePhaseStartedAt):0;if(elapsed>=max)throw Object.assign(new Error('远程阶段观察已达到上限，已暂停且保留原请求'),{code:'OBSERVATION_TIMEOUT'});return {connection:task.connection,key:await this.registry.credential(task.connection),signal:AbortSignal.any([signal,AbortSignal.timeout(Math.max(1,max-elapsed))]),fetch:this.options.fetch,model:task.model,operation:task.operation};}
   private applyRemote(task:MediaTask,remote:RemoteJob):void {if(task.remoteStatus!==remote.status||!task.remotePhaseStartedAt)task.remotePhaseStartedAt=new Date().toISOString();task.remoteJobId=remote.jobId;task.remoteStatus=remote.status;task.progress=remote.progress??task.progress;task.usage=remote.usage??task.usage;task.artifacts=remote.artifacts??task.artifacts;
     if(remote.status==='failed'){task.phase='failed';task.message='远程生成失败';task.error='远程生成失败，请检查服务端任务记录';}
     else if(remote.status==='cancelled'){task.phase='cancelled';task.message='云端已确认取消';}
@@ -100,7 +115,7 @@ export class MediaTaskService {
       const input:AdapterInput={clientRequestId:task.clientRequestId,model:task.model,operation:task.operation,prompt:task.prompt,inputs,parameters:task.parameters};
       remote=task.operation==='text-to-image'?await generateImage(context,input):await submitVideo(context,input);
       this.applyRemote(task,remote);await this.persist(task);
-    }else if(task.operation!=='text-to-image'){
+    }else if(task.operation!=='text-to-image'||task.connection.protocol==='async-task'&&task.remoteJobId){
       remote=task.remoteJobId?await getVideo(await this.context(task,signal),task.remoteJobId):await lookupVideo(await this.context(task,signal),task.clientRequestId);
       if(!remote){task.phase='unknown';task.observation='paused';task.message='未查到提交结果；没有重新发起计费请求';await this.persist(task);return;}this.applyRemote(task,remote);await this.persist(task);
     }else if(!task.artifacts?.length){task.phase='unknown';task.observation='paused';task.message='生图提交结果未确认，兼容接口不支持查单；请核对服务记录';await this.persist(task);return;}
@@ -130,7 +145,7 @@ export class MediaTaskService {
     await this.ledger.resume(taskId,task.projectId);const claimed=await this.ledger.claim(taskId,task.projectId);if(!claimed)return {...this.public(task),message:'另一执行者正在处理此任务，取消结果待确认'};task=claimed.value;this.tasks.set(taskId,task);const controller=new AbortController(),heartbeat=setInterval(()=>{void this.ledger.renew(taskId,task.projectId,claimed.generation).then(stopped=>{if(stopped)controller.abort(new Error('取消观察已停止'));}).catch(error=>controller.abort(error));},5000);heartbeat.unref();this.controls.set(taskId,controller);
     try{task.cancelRequested=true;task.remotePhaseStartedAt=new Date().toISOString();
       if(task.phase==='pending'&&!task.remoteJobId){task.phase='cancelled';task.message='已取消尚未提交的本地任务';await this.persist(task);return this.public(task);}
-      if(task.operation==='text-to-image'||!task.remoteJobId||task.model.parameters.supportsCancel===false){task.message='已停止等待；此任务尚不能确认云端取消';await this.persist(task);return this.public(task);}
+      if((task.operation==='text-to-image'&&task.connection.protocol!=='async-task')||!task.remoteJobId||task.model.parameters.supportsCancel===false){task.message='已停止等待；此任务尚不能确认云端取消';await this.persist(task);return this.public(task);}
       await this.persist(task);try{await this.ledger.assertLease(task.id,task.projectId,claimed.generation);const remote=await cancelVideo(await this.context(task,controller.signal),task.remoteJobId);this.applyRemote(task,remote);task.message=remote.status==='cancelled'?'云端已确认取消':remote.status==='succeeded'?'云端已完成，可恢复获取素材':'已请求云端取消，尚未确认';}
       catch(error){task.error=await this.redact(task,errorText(error));task.message='云端取消未确认；可恢复查询';}await this.persist(task);return this.public(task);
     }finally{clearInterval(heartbeat);this.controls.delete(taskId);await this.ledger.release(taskId,task.projectId,claimed.generation);}
