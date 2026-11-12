@@ -1,11 +1,11 @@
 import test, {type TestContext} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm} from 'node:fs/promises';
+import {mkdtemp} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {createProject,defaultSceneSource} from '../src/core/index.ts';
-import {AgentDatabase} from '../src/agent/database.ts';
+import {AgentDatabase,removeDirectory} from '../src/agent/database.ts';
 import {AgentRepository,candidateHash} from '../src/agent/repository.ts';
 import {AgentRuntime} from '../src/agent/runtime.ts';
 import type {AgentCandidate,AgentRuntimePorts,AgentScope,ValidationReceipt} from '../src/agent/contracts.ts';
@@ -17,7 +17,7 @@ async function fixture(t:TestContext){
   const session=await repo.createSession({id:'root-session',name:'导演'}),root=await repo.createTask({id:'root-task',sessionId:session.id,goal:'制作影片',scope:rootScope}),lease=await repo.claimTask(root.id,'test-root');
   const project=createProject('测试影片');project.id='project-test';const sources=Object.fromEntries(project.shots.map(shot=>[shot.id,defaultSceneSource()]));
   const scope:AgentScope={shotIds:[project.shots[0]!.id],writeFields:['source'],capabilities:['code']};
-  t.after(async()=>{await db.close();await rm(dir,{recursive:true,force:true,maxRetries:5,retryDelay:100});});
+  t.after(async()=>{await db.close();await removeDirectory(dir);});
   return {dir,file,db,repo,session,root,lease,project,sources,scope};
 }
 test('agent sessions persist separate conversations and use version CAS',async t=>{

@@ -79,6 +79,28 @@ function shutdown(pool:Pool):Promise<void> {
   })();
 }
 
+function stopWorkersUnder(directory:string){
+  if(process.platform!=='win32')return;
+  try{execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command','Get-CimInstance Win32_Process -Filter "Name=\'node.exe\'" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($env:YL_SQLITE_DIR) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }'],{env:{...process.env,YL_SQLITE_DIR:directory},stdio:'ignore',windowsHide:true,timeout:8000});}catch{/* no matching process */}}
+
+/** Ends every database process started in this process, then deletes a temp directory once Windows drops the file lock. */
+export async function disposeDatabases(directory?:string):Promise<void>{
+  const current=[...pools.values()];
+  for(const pool of current)pool.users=0;
+  await Promise.all(current.map(pool=>shutdown(pool)));
+  if(directory)stopWorkersUnder(directory);
+}
+export async function removeDirectory(directory:string):Promise<void>{
+  await disposeDatabases(directory);
+  const {rm}=await import('node:fs/promises');
+  let last:unknown;
+  for(let attempt=0;attempt<20;attempt++){
+    try{await rm(directory,{recursive:true,force:true,maxRetries:0});return;}
+    catch(error){last=error;const code=(error as NodeJS.ErrnoException).code;if(code!=='EBUSY'&&code!=='EPERM'&&code!=='ENOTEMPTY')throw error;await delay(200);}
+  }
+  throw last;
+}
+
 /** One child process per database file. A second handle shares that process so Windows does not keep two locks. */
 export class AgentDatabase {
   readonly filename:string;
