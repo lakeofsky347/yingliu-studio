@@ -215,7 +215,7 @@ export class AgentCoordinator {
       return { receipt: { candidateId: candidate.id, taskId: child.id, status: 'accepted', summary: candidate.summary, hash: candidate.hash }, acceptedCandidate: merged, snapshot:{...context.snapshot,project:current.project} };
     }
     const child = await repository.getTask(String(args.taskId)); if (child.parentTaskId !== parent.id) throw agentError('SCOPE_DENIED', '只能访问当前根任务委派的成员');
-    if (tool === 'agent_wait') return { receipt: toolTask(await runtime.wait(child.id, { timeoutMs: 30_000, signal })) };
+    if (tool === 'agent_wait') return { receipt: toolTask(await runtime.wait(child.id, { timeoutMs: 90_000, signal })) };
     if (tool === 'agent_result') return { receipt: { task: toolTask(await repository.getTask(child.id)), candidates: (await repository.listCandidates(child.id)).slice(-2).map(({ id, hash, summary, status, validationId }) => ({ id, hash, summary:summary.slice(0,512), status, validationId })), messages:(await repository.messages(child.id)).slice(-4) } };
     if (tool === 'agent_cancel') return { receipt: toolTask(await runtime.cancelChild(context.lease,child.id,child.generation)) };
     throw agentError('UNKNOWN_TOOL', '未授权的协作工具');
