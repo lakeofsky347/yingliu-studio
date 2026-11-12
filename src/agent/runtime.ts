@@ -103,9 +103,11 @@ export class AgentRuntime {
     }catch(error){
       const code=(error as {code?:string})?.code;
       if(code==='DB_CONFLICT'&&retries<2){if(heartbeat)clearInterval(heartbeat);heartbeat=undefined;return this.execute(taskId,controller,retries+1);}
-      const task=await this.repository.getTask(taskId);if(!lease||task.generation!==lease.generation||task.status==='cancelled')return task;
+      const message=error instanceof Error?error.message:String(error),checkpoint=code??'execution-error';
+      const task=await this.repository.getTask(taskId);if(!lease||task.generation!==lease.generation||task.status==='cancelled')return {...task,checkpoint:task.checkpoint??checkpoint,error:task.error??message};
       const status=signal.aborted?'paused':code==='RECONCILIATION_REQUIRED'?'blocked':code==='SCOPE_DENIED'||code==='TOOL_DENIED'?'failed':'blocked';
-      try{return await this.repository.transition(lease,status,{error:error instanceof Error?error.message:String(error),checkpoint:code??'execution-error'});}catch{return this.repository.getTask(taskId);}
+      try{return await this.repository.transition(lease,status,{error:message,checkpoint});}
+      catch(persistError){const current=await this.repository.getTask(taskId);return {...current,checkpoint,error:message+'；状态写入失败：'+(persistError instanceof Error?persistError.message:String(persistError))};}
     }finally{if(heartbeat)clearInterval(heartbeat);}
   }
   private completeCandidate(task:AgentTask,payload:AgentCandidatePayload):AgentCandidatePayload{

@@ -63,7 +63,7 @@ test('uncertain remote execution is reconciled rather than resubmitted after ret
   const f=await fixture(t);let executions=0,models=0;
   const runtime=new AgentRuntime(f.repo,{async context(){return {summary:'固定输入'};},async text(){models++;return JSON.stringify({type:'execute',tool:'code',shotId:f.scope.shotIds[0],input:{}});},async inspect(){return {};},async execute(){executions++;throw new Error('response lost after submission');},async validate(){throw new Error('unreachable');}});t.after(()=>runtime.dispose());
   const task=await runtime.delegate({parentTaskId:f.root.id,parentLease:f.lease,mode:'subagent',goal:'代码候选',scope:f.scope,data:{baseline:{project:f.project,sources:f.sources}}});const blocked=await runtime.wait(task.id,{timeoutMs:20000});assert.equal(blocked.status,'blocked');
-  const retried=await runtime.run(task.id);assert.equal(retried.status,'blocked');assert.equal(retried.checkpoint,'RECONCILIATION_REQUIRED');assert.equal(executions,1);assert.equal(models,1);
+  const retried=await runtime.run(task.id);assert.equal(retried.status,'blocked');assert.equal(retried.checkpoint,'RECONCILIATION_REQUIRED',JSON.stringify({error:retried.error,executions,models}));assert.equal(executions,1);assert.equal(models,1);
 });
 test('candidate evidence needs mandatory deterministic checks and parent-only acceptance',async t=>{
   const f=await fixture(t),session=await f.repo.createSession({kind:'subagent',parentSessionId:f.session.id}),task=await f.repo.createTask({sessionId:session.id,parentTaskId:f.root.id,goal:'检查',scope:{shotIds:f.scope.shotIds,writeFields:[],capabilities:[]},data:{baseline:{project:f.project,sources:f.sources}}}),lease=await f.repo.claimTask(task.id,'child');
