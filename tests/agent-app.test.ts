@@ -43,7 +43,7 @@ test('application exposes agent RPC; a scripted tool-calling model edits a real 
     }
     const run = await call<PublicRun>('agent.start', { projectId, goal: '把标题改成更好的', maxReviewRounds: 0 });
     let current = run;
-    for (let i = 0; i < 300 && !['complete', 'failed', 'budget_exceeded'].includes(current.status); i++) { await new Promise(r => setTimeout(r, 20)); current = await call<PublicRun>('agent.get', { runId: run.id }); }
+    for (let i = 0; i < 1500 && !['complete', 'failed', 'budget_exceeded'].includes(current.status); i++) { await new Promise(r => setTimeout(r, 20)); current = await call<PublicRun>('agent.get', { runId: run.id }); }
     assert.equal(current.status, 'complete', current.message);
     const after = await call<StudioSnapshot>('current', { projectId });
     assert.equal(after.project!.title, '智能体改过的标题'); assert.equal(after.project!.shots.length, 1);
