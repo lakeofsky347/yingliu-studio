@@ -109,3 +109,19 @@ test('speech preflight classification preserves a frozen provider error as its c
   const original=Object.freeze(Object.assign(new Error('fixture preflight error'),{submissionUncertain:true})),classified=speechPreflightFailure(original);
   assert.equal(classified.submissionUncertain,false);assert.equal(classified.message,original.message);assert.equal(classified.cause,original);assert.equal(original.submissionUncertain,true);
 });
+
+test('a delayed ancillary read cannot combine an old project with a newly completed task',async()=>{
+ const base=await mkdtemp(join(tmpdir(),'yingliu-coherent-snapshot-')),service=serviceAt(base),renderGate=deferred(),snapshotEntered=deferred(),snapshotRelease=deferred();
+ const recent=service.store.recent.bind(service.store);let pending:Promise<StudioSnapshot>|undefined;
+ try{
+  const initial=await call(service,'create',{title:'一致的任务快照'});
+  service.renderer.export=async(root,project)=>{await renderGate.promise;return output(root,project.revision);};
+  await call(service,'export',{expectedRevision:0});
+  let block=true;service.store.recent=async()=>{if(block){block=false;snapshotEntered.resolve();await snapshotRelease.promise;}return recent();};
+  pending=service.snapshot();await snapshotEntered.promise;
+  const edited=structuredClone(initial.project!);edited.title='任务完成前编辑';await call(service,'save',{project:edited,expectedRevision:0});
+  renderGate.resolve();await (service as unknown as {job:Promise<void>}).job;
+  snapshotRelease.resolve();const snapshot=await pending;
+  assert.equal(snapshot.task!.status,'complete');assert.equal(snapshot.project!.revision,2);assert.equal(snapshot.project!.title,edited.title);assert.equal(snapshot.project!.outputs.length,1);
+ }finally{renderGate.resolve();snapshotRelease.resolve();await pending?.catch(()=>{});service.store.recent=recent;await service.dispose();await rm(base,{recursive:true,force:true});}
+});

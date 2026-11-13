@@ -11,7 +11,7 @@ import { compileSpec } from '../core/index.js';
 import {hashMediaFile} from '../media/video.js';
 import { ProjectStore, projectPath } from './store.js';
 import { browserRuntime, runtimeHtml } from '../runtime/browser.js';
-import {AudioMixer, type AudioMix} from './audio.js';
+import {AudioMixer,probeAudio, type AudioMix} from './audio.js';
 import {inspectToolEnvironment, type ToolEnvironmentOptions} from './tool-environment.js';
 
 export interface FrameCapture { frame:number; shotId:string; path:string; sha256:string }
@@ -26,6 +26,14 @@ export function detectEnvironment(settings:Partial<EnvironmentSettings>={},optio
 function hash(buffer:Buffer|string):string { return createHash('sha256').update(buffer).digest('hex'); }
 function json(value:unknown):string { return JSON.stringify(value,null,2)+'\n'; }
 function aborted(signal?:AbortSignal):void { if(signal?.aborted)throw new Error('Task cancelled'); }
+export function validatePhase(step:string,detail=''):void{console.error(`[validate-phase] ${new Date().toISOString()} ${step}${detail?' '+detail:''}`);}
+async function closeBrowser(browser:Browser):Promise<void>{
+  validatePhase('closeBrowser','start');
+  const pid=(browser as Browser&{process?:()=>{pid?:number}|null}).process?.()?.pid;
+  await Promise.race([browser.close().catch(()=>undefined),new Promise(resolve=>setTimeout(resolve,8_000))]);
+  if(pid){try{process.kill(pid,'SIGKILL');}catch{/* the browser already exited */}}
+  validatePhase('closeBrowser','end');
+}
 function keyFrames(spec:VideoSpec):number[] { return [...new Set(spec.shots.flatMap(shot=>[shot.startFrame,Math.floor((shot.startFrame+shot.endFrame-1)/2),shot.endFrame-1]))].sort((a,b)=>a-b); }
 function safeId(id:string):string { if(!/^[a-zA-Z0-9_-]{1,100}$/.test(id))throw new Error('Unsafe scene ID');return id; }
 async function deadline<T>(promise:Promise<T>,message:string):Promise<T> {
@@ -50,9 +58,11 @@ async function projectServer(root:string):Promise<ProjectServer> {
       const host=req.headers.host??'';
       if(!/^(?:127\.0\.0\.1|localhost):\d+$/.test(host)){res.writeHead(403);res.end();return;}
       const pathname=decodeURIComponent(new URL(req.url??'/','http://'+host).pathname);
-      const relative=pathname.replace(/^\//,'')||'index.html';
+      let relative=pathname.replace(/^\//,'')||'index.html';
+      // Immutable version pages share only immutable asset files with the project root.
+      relative=relative.replace(/^runtime\/versions\/[a-f0-9]{64}\/assets\//,'assets/');
       // Scene code may read render resources, never editor state, journals or source history.
-      const allowed=relative==='index.html'||/^runtime\/(?:frame\.mjs|spec\.json|scenes\/[\w-]+\.mjs|audio\/mix-[\w-]+\.wav)$/.test(relative)||
+      const allowed=/^runtime\/versions\/[a-f0-9]{64}\/(?:index\.html|runtime\/(?:frame\.mjs|spec\.json|scenes\/[\w-]+\.mjs))$/.test(relative)||relative==='index.html'||/^runtime\/(?:frame\.mjs|spec\.json|scenes\/[\w-]+\.mjs|audio\/mix-[\w-]+\.wav)$/.test(relative)||
         /^assets\/[\w./-]+$/.test(relative)||/^\.studio\/inspection\/[\w-]+\.png$/.test(relative)||/^exports\/[\w-]+\/video\.mp4$/.test(relative);
       if(!allowed){res.writeHead(403);res.end('Resource is private');return;}
       const full=await projectPath(absoluteRoot,relative),type=mime[path.extname(full).toLowerCase()];
@@ -94,8 +104,8 @@ export class VideoRenderer {
   private readonly store:ProjectStore;
   constructor(store:ProjectStore=new ProjectStore()) { this.store=store; }
   async preview(root:string,project:VideoProject):Promise<string> {
-    await this.prepare(root,project);
-    const server=await this.server(root);return server.origin+'/index.html?revision='+project.revision;
+    const prepared=await this.prepare(root,project);
+    const server=await this.server(root);return server.origin+prepared.urlPath;
   }
   async assetBaseUrl(root:string):Promise<string> {return (await this.server(root)).origin+'/';}
   async assetUrl(root:string,asset:Asset):Promise<string> {
@@ -114,29 +124,39 @@ export class VideoRenderer {
     try{const server=await pending;this.servers.set(key,server);return server;}
     finally{if(this.pendingServers.get(key)===pending)this.pendingServers.delete(key);}
   }
-  private async prepare(root:string,project:VideoProject):Promise<VideoSpec> {
-    const spec=compileSpec(project);const sources:{id:string;html:string;css:string;moduleUrl:string}[]=[];
-    await fs.mkdir(await projectPath(root,'runtime/scenes'),{recursive:true});
+  private async prepare(root:string,project:VideoProject):Promise<{spec:VideoSpec;urlPath:string}> {
+    const spec=compileSpec(project),sources:{id:string;html:string;css:string;js:string;moduleUrl:string}[]=[];
     for(const shot of spec.shots){
       try{
         const source=await this.store.readSource(root,shot,project.revision);safeId(shot.id);
-        // ESM modules are files served under a restrictive self-only CSP; no privileged APIs are exposed.
-        await fs.writeFile(await projectPath(root,'runtime/scenes/'+shot.id+'.mjs'),source.js);
-        sources.push({id:shot.id,html:source.html,css:source.css,moduleUrl:'./scenes/'+shot.id+'.mjs'});
+        sources.push({id:shot.id,...source,moduleUrl:'./scenes/'+shot.id+'.mjs'});
       }catch(error){const e=error as Error&RenderIssue;e.shotId=shot.id;throw e;}
     }
-    await fs.writeFile(await projectPath(root,'runtime/frame.mjs'),browserRuntime);
-    await fs.writeFile(await projectPath(root,'runtime/spec.json'),json({spec,sources}));
-    await fs.writeFile(await projectPath(root,'index.html'),runtimeHtml(spec.target.width,spec.target.height));
-    return spec;
+    const version=hash(json({spec,sources,runtime:browserRuntime})),relative='runtime/versions/'+version;
+    const destination=await projectPath(root,relative),temporary=destination+'.tmp-'+randomUUID();
+    try{
+      await fs.access(path.join(destination,'index.html'));
+    }catch{
+      await fs.mkdir(path.join(temporary,'runtime/scenes'),{recursive:true});
+      try{
+        for(const source of sources)await fs.writeFile(path.join(temporary,'runtime/scenes',source.id+'.mjs'),source.js);
+        await fs.writeFile(path.join(temporary,'runtime/frame.mjs'),browserRuntime);
+        await fs.writeFile(path.join(temporary,'runtime/spec.json'),json({spec,sources:sources.map(({js,...source})=>source)}));
+        await fs.writeFile(path.join(temporary,'index.html'),runtimeHtml(spec.target.width,spec.target.height));
+        try{await fs.rename(temporary,destination);}catch(error){if(!['EEXIST','ENOTEMPTY'].includes((error as NodeJS.ErrnoException).code??''))throw error;}
+      }finally{await fs.rm(temporary,{recursive:true,force:true});}
+    }
+    return {spec,urlPath:'/'+relative+'/index.html'};
   }
   private async openPage(url:string,spec:VideoSpec,settings:EnvironmentSettings,issues:RenderIssue[],signal?:AbortSignal):Promise<{browser:Browser;page:Page;removeAbort:()=>void}> {
     aborted(signal);const env=detectEnvironment(settings);if(!env.browserAvailable)throw new Error('Chrome/Chromium unavailable. Set browserPath in environment settings.');
+    validatePhase('openPage','start');
     await fs.access(env.browserPath,constants.X_OK);
+    validatePhase('openPage','launch');
     // 逐帧契约要求同一帧可复现：GPU 光栅的 2D canvas 在不同页面状态下会出现 ±1 的采样差异，
     // 会让逆序 seek / 冷启动的字节比对偶发失败。固定用 Skia 软件光栅画 2D canvas，
     // 合成与 WebGL 仍走原路径，渲染结果与截图因此稳定可复现。
-    const browser=await chromium.launch({executablePath:env.browserPath,headless:true,args:['--disable-background-timer-throttling','--disable-renderer-backgrounding','--disable-accelerated-2d-canvas','--disable-accelerated-video-decode']});this.browsers.add(browser);
+    const browser=await new Promise<Browser>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Browser launch (90 s timeout)')),90_000);chromium.launch({executablePath:env.browserPath,headless:true,timeout:90_000,args:['--disable-background-timer-throttling','--disable-renderer-backgrounding','--disable-accelerated-2d-canvas','--disable-accelerated-video-decode']}).then(value=>{clearTimeout(timer);resolve(value);},error=>{clearTimeout(timer);reject(error);});});this.browsers.add(browser);
     const cancel=()=>{void browser.close().catch(()=>{});};signal?.addEventListener('abort',cancel,{once:true});
     try {
       const context=await browser.newContext({viewport:{width:spec.target.width,height:spec.target.height},deviceScaleFactor:1,serviceWorkers:'block'});
@@ -151,17 +171,21 @@ export class VideoRenderer {
       page.on('pageerror',error=>issues.push({message:error.message}));
       page.on('console',message=>{if(message.type()==='error')issues.push({message:message.text()});});
       page.on('response',response=>{if(response.status()>=400)issues.push({message:'HTTP '+response.status()+': '+new URL(response.url()).pathname});});
+      validatePhase('openPage','goto');
       await page.goto(url,{waitUntil:'load',timeout:30_000});
+      validatePhase('openPage','wait-runtime');
       await page.waitForFunction(()=>!!(window as any).__VIDEO_WORKPACK__);
       const ready=await deadline(page.evaluate(async()=>{
         try{await (window as any).__VIDEO_WORKPACK__.ready();return {ok:true};}
         catch(error){const e=error as any;return {ok:false,message:e.message,shotId:e.shotId};}
       }),'Scene ready');
       if(!ready.ok){issues.push({shotId:ready.shotId,message:ready.message??'Renderer ready failed'});throw new Error(ready.message);}
+      validatePhase('openPage','end');
       return {browser,page,removeAbort:()=>signal?.removeEventListener('abort',cancel)};
-    }catch(error){signal?.removeEventListener('abort',cancel);await browser.close().catch(()=>{});this.browsers.delete(browser);throw error;}
+    }catch(error){signal?.removeEventListener('abort',cancel);await closeBrowser(browser);this.browsers.delete(browser);throw error;}
   }
   private async frame(page:Page,spec:VideoSpec,frame:number):Promise<{buffer:Buffer;shotId:string}> {
+    validatePhase('frame',`start ${frame}`);
     const result=await deadline(page.evaluate(async input=>{
       try{
         const info=await (window as any).__VIDEO_WORKPACK__.renderFrame(input);
@@ -170,19 +194,21 @@ export class VideoRenderer {
       }catch(error){const e=error as any;return {ok:false,message:e.message,shotId:e.shotId,frame:e.frame};}
     },{frame,fps:spec.target.fps}),'Frame '+frame);
     if(!result.ok){const error=new Error(result.message) as Error&RenderIssue;error.shotId=result.shotId;error.frame=result.frame;throw error;}
-    return {buffer:await page.screenshot({type:'png',clip:{x:0,y:0,width:spec.target.width,height:spec.target.height},timeout:30_000}),shotId:result.info.sceneId};
+    const captured={buffer:await page.screenshot({type:'png',clip:{x:0,y:0,width:spec.target.width,height:spec.target.height},timeout:30_000}),shotId:result.info.sceneId};
+    validatePhase('frame',`end ${frame}`);
+    return captured;
   }
   async capture(root:string,project:VideoProject,settings:EnvironmentSettings,frame:number,signal?:AbortSignal):Promise<FrameCapture&{url:string}>{
-    const spec=await this.prepare(root,project),errors:RenderIssue[]=[];aborted(signal);
+    const {spec,urlPath}=await this.prepare(root,project),errors:RenderIssue[]=[];aborted(signal);
     if(!Number.isSafeInteger(frame)||frame<0||frame>=spec.durationFrames)throw new Error('Frame outside project: '+frame);
     let connection:Awaited<ReturnType<VideoRenderer['openPage']>>|undefined;
     try{
-      const server=await this.server(root);connection=await this.openPage(server.origin+'/index.html',spec,settings,errors,signal);
+      const server=await this.server(root);connection=await this.openPage(server.origin+urlPath,spec,settings,errors,signal);
       const result=await this.frame(connection.page,spec,frame);aborted(signal);
       if(errors.length)throw new Error(errors.map(error=>error.message).join('; '));
       const relative='.studio/inspection/'+project.revision+'-'+frame+'-'+randomUUID()+'.png',file=await projectPath(root,relative);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,result.buffer);
       return {frame,shotId:result.shotId,path:file,sha256:hash(result.buffer),url:server.origin+'/'+relative};
-    }finally{if(connection){connection.removeAbort();await connection.browser.close().catch(()=>{});this.browsers.delete(connection.browser);}}
+    }finally{if(connection){connection.removeAbort();await closeBrowser(connection.browser);this.browsers.delete(connection.browser);}}
   }
   /** Render an immutable candidate without writing the live project or its runtime. */
   async captureCandidate(root:string,project:VideoProject,sources:Record<string,SceneSource>,settings:EnvironmentSettings,frame:number,signal?:AbortSignal):Promise<{bytes:Uint8Array;mime:string;sha256:string}>{
@@ -203,12 +229,42 @@ export class VideoRenderer {
       return {bytes:await fs.readFile(capture.path),mime:'image/png',sha256:capture.sha256};
     }finally{await renderer.close();await fs.rm(snapshotRoot,{recursive:true,force:true});}
   }
+  async checkCandidateAudio(root:string,project:VideoProject,settings:EnvironmentSettings,signal?:AbortSignal){
+    const mixer=new AudioMixer();
+    try{const mixed=await mixer.mix(root,project,settings,signal);if(!mixed)throw new Error('候选要求音频，但混音计划为空');
+      const actual=await probeAudio(mixed.path,settings,signal),expected=compileSpec(project).durationSeconds;
+      if(actual.sampleRate!==48000||actual.channels!==2||Math.abs(actual.duration-expected)>.05)throw new Error('候选混音时长、采样率或声道数与工程不一致');
+      return {duration:actual.duration,sha256:await hashMediaFile(mixed.path,signal)};
+    }finally{await mixer.close();}
+  }
+  async checkCandidate(root:string|undefined,project:VideoProject,sources:Record<string,SceneSource>,settings:EnvironmentSettings,signal?:AbortSignal):Promise<RenderCheckResult>{
+    aborted(signal);const snapshotRoot=await fs.mkdtemp(path.join(os.tmpdir(),'video-studio-candidate-'));
+    const renderer=new VideoRenderer(),snapshot=structuredClone(project);snapshot.outputs=[];
+    try{
+      for(const asset of snapshot.assets)delete asset.originalPath;
+      await fs.writeFile(path.join(snapshotRoot,'project.json'),json(snapshot));
+      for(const asset of snapshot.assets)if(asset.path){
+        if(!root)throw new Error('新工程候选不能引用尚未导入的素材');
+        aborted(signal);const input=await projectPath(root,asset.path),output=await projectPath(snapshotRoot,asset.path);
+        await fs.mkdir(path.dirname(output),{recursive:true});await fs.copyFile(input,output);
+      }
+      for(const shot of snapshot.shots){
+        const source=sources[shot.id];if(!source)throw new Error('候选缺少镜头源码：'+shot.id);
+        aborted(signal);await this.store.writeSource(snapshotRoot,shot,source);
+      }
+      const checked=await renderer.check(snapshotRoot,snapshot,settings,signal);
+      // Snapshot files are discarded; receipts retain hashes, never dangling temporary paths.
+      return {...checked,reportPath:undefined,frames:checked.frames.map(frame=>({...frame,path:''}))};
+    }finally{await renderer.close();await fs.rm(snapshotRoot,{recursive:true,force:true});}
+  }
   async check(root:string,project:VideoProject,settings:EnvironmentSettings,signal?:AbortSignal):Promise<RenderCheckResult> {
     const errors:RenderIssue[]=[],frames:FrameCapture[]=[];let connection:Awaited<ReturnType<VideoRenderer['openPage']>>|undefined;
     const reportRoot=await projectPath(root,'validation/check-'+randomUUID());await fs.mkdir(reportRoot,{recursive:true});
     try {
-      const spec=await this.prepare(root,project),url=(await this.server(root)).origin+'/index.html';
+      const {spec,urlPath}=await this.prepare(root,project),url=(await this.server(root)).origin+urlPath;
       connection=await this.openPage(url,spec,settings,errors,signal);
+      // 冷启动的第一轮截图可能赶在字体和软件光栅稳定之前，逆序 seek 与重新加载会对不上。先丢掉这一轮。
+      for(const frame of keyFrames(spec)){aborted(signal);await this.frame(connection.page,spec,frame);}
       for(const frame of keyFrames(spec)){
         aborted(signal);const result=await this.frame(connection.page,spec,frame);
         const file=path.join(reportRoot,String(frame).padStart(6,'0')+'.png');await fs.writeFile(file,result.buffer);
@@ -217,7 +273,7 @@ export class VideoRenderer {
       await this.verifySeek(connection.page,spec,frames,errors,signal);
       if(errors.length===0)for(const shot of project.shots)await this.store.markSourceGood(root,shot);
     }catch(error){const e=error as Error&RenderIssue;errors.push({shotId:e.shotId,frame:e.frame,message:signal?.aborted?'Task cancelled':e.message});}
-    finally{if(connection){connection.removeAbort();await connection.browser.close().catch(()=>{});this.browsers.delete(connection.browser);}}
+    finally{if(connection){connection.removeAbort();await closeBrowser(connection.browser);this.browsers.delete(connection.browser);}}
     const reportPath=path.join(reportRoot,'check.json');const result={ok:errors.length===0,errors:deduplicate(errors),frames,reportPath};
     await fs.writeFile(reportPath,json(result));return result;
   }
@@ -251,7 +307,7 @@ export class VideoRenderer {
       const source=await this.store.readSource(root,shot,project.revision);await this.store.writeSource(snapshotRoot,shot,source);
       inputHashes.push({path:shot.sourcePath+'/source.json',sha256:hash(json(source))});
     }
-    const spec=await this.prepare(snapshotRoot,snapshot),errors:RenderIssue[]=[],frames:FrameCapture[]=[];
+    const {spec,urlPath}=await this.prepare(snapshotRoot,snapshot),errors:RenderIssue[]=[],frames:FrameCapture[]=[];
     if(spec.target.width%2||spec.target.height%2)throw new Error('H.264 yuv420p requires even width and height');
     const snapshotServer=await projectServer(snapshotRoot);let connection:Awaited<ReturnType<VideoRenderer['openPage']>>|undefined,encoder:ChildProcess|undefined;
     const mp4Path=path.join(outputRoot,'video.mp4'),logPath=path.join(outputRoot,'ffmpeg.log');let log='',audioMix:AudioMix|null=null;
@@ -260,7 +316,7 @@ export class VideoRenderer {
     try {
       onProgress(0.03,'制作输入已保存快照');audioMix=await this.audioMixer.mix(snapshotRoot,snapshot,env,signal);
       if(audioMix){await fs.writeFile(path.join(outputRoot,'audio-plan.json'),json(audioMix.plan));onProgress(.06,'配音、音乐与音效已完成混音');}
-      connection=await this.openPage(snapshotServer.origin+'/index.html',spec,env,errors,signal);
+      connection=await this.openPage(snapshotServer.origin+urlPath,spec,env,errors,signal);
       const audioArgs=audioMix?['-i',audioMix.path,'-map','0:v:0','-map','1:a:0','-c:a','aac','-b:a','192k','-ar','48000','-ac','2','-t',String(spec.durationSeconds)]:['-an'];
       const crf=spec.target.quality==='high'?'16':spec.target.quality==='small'?'23':'18';
       encoder=spawn(env.ffmpegPath,['-hide_banner','-loglevel','warning','-y','-f','image2pipe','-vcodec','png','-framerate',spec.target.fps.num+'/'+spec.target.fps.den,'-i','pipe:0',...audioArgs,'-c:v','libx264','-preset','medium','-crf',crf,'-pix_fmt','yuv420p','-movflags','+faststart',mp4Path],{stdio:['pipe','ignore','pipe']});this.children.add(encoder);
@@ -296,7 +352,7 @@ export class VideoRenderer {
       await fs.writeFile(logPath,log);await fs.writeFile(path.join(outputRoot,'failure.json'),json({status:signal.aborted?'cancelled':'failed',message:(error as Error).message,errors:deduplicate(errors),frames,inputHashes,snapshotRoot}));
       await fs.rm(mp4Path,{force:true});throw new Error(signal.aborted?'Task cancelled':(error as Error).message);
     }finally{
-      signal.removeEventListener('abort',cancel);if(connection){connection.removeAbort();await connection.browser.close().catch(()=>{});this.browsers.delete(connection.browser);}
+      signal.removeEventListener('abort',cancel);if(connection){connection.removeAbort();await closeBrowser(connection.browser);this.browsers.delete(connection.browser);}
       await closeServer(snapshotServer.server);
     }
   }
@@ -324,7 +380,7 @@ export class VideoRenderer {
   async close():Promise<void> {
     for(const child of this.children)stopChild(child);
     await this.audioMixer.close();
-    await Promise.allSettled([...this.browsers].map(browser=>browser.close()));this.browsers.clear();
+    await Promise.allSettled([...this.browsers].map(browser=>closeBrowser(browser)));this.browsers.clear();
     await Promise.allSettled([...this.pendingServers.values()]);
     await Promise.allSettled([...this.servers.values()].map(server=>closeServer(server.server)));this.servers.clear();this.pendingServers.clear();
   }

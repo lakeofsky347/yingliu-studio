@@ -4,6 +4,7 @@ import { createReadStream, openSync, closeSync, writeSync, mkdirSync } from 'nod
 import { readFile, mkdir, rename, stat, mkdtemp, rm, open } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
+import {contentHash} from '../agent/repository.ts';
 import { ProjectStore, projectPath, validateStoredProject } from '../host/store.ts';
 import type { BackendPort } from './contracts.ts';
 import type { Asset, SceneSource, StudioSnapshot, VideoProject } from '../shared/types.ts';
@@ -101,14 +102,14 @@ export async function exportProjectArchive(backend:BackendPort,input:{projectId?
   await mkdir(dirname(destination),{recursive:true});
   try{
     const size=await writeArchive(temporary,entries,{project},limits);
-    const current=await backend.call<StudioSnapshot>('current',{projectId:project.id});if(current.project?.revision!==project.revision)throw new Error('备份期间工程发生变化，请等待保存后重试');
+    // Sources and immutable assets were pinned to the captured revision above.
     const name=(project.title.replace(/[<>:"/\\|?*]/g,'-')||'影片')+'.yingliu';
     if(input.path){await rename(temporary,destination);return {name,path:destination,size};}
     if(size>INLINE_LIMIT)throw new Error('浏览器工程包传输超过 64 MiB；请使用桌面应用保存工程包');return {name,dataBase64:(await readFile(temporary)).toString('base64'),size};
   }finally{await rm(temporary,{force:true});if(temporaryDirectory)await rm(temporaryDirectory,{recursive:true,force:true});}
 }
 
-export async function importProjectArchive(backend:BackendPort,input:{path?:string;dataBase64?:string;limits?:ArchiveLimits}):Promise<StudioSnapshot>{
+export async function importProjectArchive(backend:BackendPort,input:{path?:string;dataBase64?:string;limits?:ArchiveLimits;operationId?:string;expectedRevision?:null}):Promise<StudioSnapshot>{
   const limits=resolveLimits(input.limits);
   if(!input.path&&!input.dataBase64)throw new Error('请选择一个 .yingliu 工程包');
   if(input.path&&input.dataBase64)throw new Error('工程包文件和数据只能选择一种');
@@ -123,9 +124,10 @@ export async function importProjectArchive(backend:BackendPort,input:{path?:stri
       const file=files.get(entry.name);if(!file||entry.bytes!==file.bytes||entry.sha256!==file.sha256)throw new Error('工程包内容损坏：'+entry.name);
     }
     const project=cleanProject(JSON.parse(await readFile(projectFile.path,'utf8')) as VideoProject);validateStoredProject(project);
-    project.id='film-'+randomUUID();project.revision=0;project.createdAt=project.updatedAt=new Date().toISOString();
+    const operationId=input.operationId??randomUUID(),payloadHash=contentHash({kind:'archive.import',manifest,limits});
+    project.id='film-'+contentHash({operationId}).slice(0,32);project.revision=0;
     const sources=[];for(const shot of project.shots){const entry=files.get('sources/'+shot.id+'.json');if(!entry)throw new Error('工程包缺少镜头源码');sources.push({shotId:shot.id,source:JSON.parse(await readFile(entry.path,'utf8')) as SceneSource});}
     const assetFiles=[...new Set(project.assets.flatMap(assetPaths))].map(path=>{if(!allowed(path)||!path.startsWith('assets/'))throw new Error('素材路径无效');const entry=files.get(path);if(!entry)throw new Error('工程包缺少素材 '+path);return {path,localPath:entry.path};});
-    return await backend.call('create',{project,sources,assetFiles});
+    return await backend.call('create',{project,sources,assetFiles,operationId,expectedRevision:null,operation:{id:operationId,payloadHash}});
   }finally{await rm(directory,{recursive:true,force:true});}
 }

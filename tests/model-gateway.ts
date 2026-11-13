@@ -15,3 +15,18 @@ export function mockDirectorResponse(body:unknown):Record<string,unknown>{
   return {intent:'modify',message:'已按请求规划局部修改。',done:true,actions:[{tool:'video_update',arguments:{expectedRevision:project.revision,update:{shotPatches:shots.map(shot=>({id:shot.id,patch:demoPatch(shot,context.request,project.target.fps.num/project.target.fps.den)}))}}}]};
 }
 export function mockCompletionBody(body:unknown){return {choices:[{message:{role:'assistant',content:JSON.stringify(mockDirectorResponse(body))},finish_reason:'stop'}]};}
+
+/** Test-only scripted chat-completions gateway that can answer with native tool_calls (no paid provider). */
+export type GatewayReply = {toolCalls?:{name:string;arguments:unknown;id?:string}[];text?:string;status?:number;error?:string;usage?:{prompt_tokens:number;completion_tokens:number}};
+export function toolGateway(script:(body:Record<string,any>,turn:number)=>GatewayReply){
+  const requests:Record<string,any>[]=[];let turn=0;
+  const realFetch=globalThis.fetch;
+  const gatewayFetch=(async(_url:unknown,init?:{body?:unknown})=>{
+    if(!String(_url).includes('gateway.test'))return realFetch(_url as string,init as RequestInit);
+    const body=JSON.parse(String(init?.body??'{}'));requests.push(body);const reply=script(body,turn++);
+    if(reply.status&&reply.status>=400)return new Response(reply.error??'error',{status:reply.status});
+    const calls=reply.toolCalls?.map((call,index)=>({id:call.id??`call_${turn}_${index}`,type:'function',function:{name:call.name,arguments:JSON.stringify(call.arguments)}}));
+    return new Response(JSON.stringify({choices:[{message:{role:'assistant',content:reply.text??null,...(calls?.length?{tool_calls:calls}:{})},finish_reason:calls?.length?'tool_calls':'stop'}],usage:reply.usage??{prompt_tokens:100,completion_tokens:20}}),{headers:{'content-type':'application/json'}});
+  }) as unknown as typeof fetch;
+  return {fetch:gatewayFetch,requests,reset(){turn=0;}};
+}

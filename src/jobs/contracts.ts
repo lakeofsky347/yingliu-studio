@@ -22,6 +22,8 @@ export interface MediaTask {
   progress:number;message:string;error?:string;createdAt:string;updatedAt:string;
   artifacts?:MediaArtifact[];files:GeneratedFile[];usage?:MediaUsage;applied?:{assetIds:string[];revision:number};
   cancelRequested?:boolean;resumeOnStart?:boolean;
+  requestHash?:string;artifactDirectory?:string;
+  observationStartedAt?:string;remotePhaseStartedAt?:string;
   metrics?:{submittedAt?:string;remoteCompletedAt?:string;readyAt?:string;appliedAt?:string;generationMs?:number;downloadMs?:number;downloadBytes?:number};
 }
 export interface MediaRegistryPort {
@@ -31,12 +33,13 @@ export interface MediaRegistryPort {
   setUsageGuard?(guard:(connectionId:string,modelId?:string)=>boolean|Promise<boolean>):void;
 }
 export interface MediaProjectPort {
+  databasePath(projectId:string):Promise<string>;
   inspect(projectId:string):Promise<{revision:number;shotIds:string[]}>;
   /** Must enforce current project/shot asset membership and filesystem boundaries. */
   readImage(projectId:string,assetId:string,shotId?:string):Promise<{bytes:Uint8Array;mime:string}>;
   /** Must inspect actual media, not merely trust extension or provider content type. */
   validateArtifact(path:string,mimeType:string,projectId:string,signal?:AbortSignal):Promise<Record<string,unknown>>;
   /** One CAS transaction; idempotent for provenance.taskId in case response is lost. */
-  applyResult(input:{projectId:string;shotId?:string;expectedRevision:number;files:GeneratedFile[];provenance:{taskId:string;connectionId:string;model:string;operation:MediaOperation;prompt:string;inputHashes:{assetId:string;sha256:string}[]}}):Promise<{assetIds:string[];revision:number}>;
+  applyResult(input:{projectId:string;shotId?:string;expectedRevision:number;files:GeneratedFile[];operation?:{id:string;payloadHash:string;serviceFence?:{kind:'media';id:string;owner:string;generation:number}};provenance:{taskId:string;connectionId:string;model:string;operation:MediaOperation;prompt:string;inputHashes:{assetId:string;sha256:string}[]}}):Promise<{assetIds:string[];revision:number}>;
 }
-export interface MediaTaskOptions {fetch?:typeof fetch;pollIntervalMs?:number;maxConcurrent?:number;maxArtifactBytes?:number;maxTaskBytes?:number;onChange?:(task:MediaTask)=>void}
+export interface MediaTaskOptions {fetch?:typeof fetch;pollIntervalMs?:number;maxConcurrent?:number;maxArtifactBytes?:number;maxTaskBytes?:number;maxObservationMs?:number;onChange?:(task:MediaTask)=>void}

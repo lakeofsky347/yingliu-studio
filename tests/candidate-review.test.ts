@@ -51,9 +51,10 @@ test('real Chromium candidate capture changes pixels without mutating live head,
     const { root, project } = await store.create({ project: initial, sources: [{ shotId: shot.id, source: blue }] });
     const baseline = await renderer.capture(root, project, environment, 6);
     const baselineBytes = await fs.readFile(baseline.path), liveFiles = await fileHashes(root);
-    for (const file of ['project.json', '.studio/state.json', shot.sourcePath + '/source.json', 'runtime/spec.json', 'runtime/scenes/' + shot.id + '.mjs']) {
+    for (const file of ['project.json', '.studio/state.json', shot.sourcePath + '/source.json']) {
       assert.ok(liveFiles[file], 'Baseline must include ' + file);
     }
+    assert.ok(Object.keys(liveFiles).some(file=>/^runtime\/versions\/[a-f0-9]{64}\/runtime\/spec.json$/.test(file)));
     const originalProject = structuredClone(project);
     const candidate = await renderer.captureCandidate(root, project, { [shot.id]: scene('#ff0000') }, environment, 6);
 
@@ -71,4 +72,19 @@ test('real Chromium candidate capture changes pixels without mutating live head,
     await renderer.close();
     await fs.rm(directory, { recursive: true, force: true });
   }
+});
+
+test('independent preview servers keep both committed versions addressable without overwriting runtime',async()=>{
+  const directory=await fs.mkdtemp(path.join(os.tmpdir(),'studio-version-preview-')),store=new ProjectStore({baseDirectory:directory}),first=new VideoRenderer(store),second=new VideoRenderer(store);
+  try{
+    const initial=createProject('并行版本预览'),shot=initial.shots[0]!;
+    const {root,project}=await store.create({project:initial,sources:[{shotId:shot.id,source:scene('#0000ff')}]});
+    const oldUrl=await first.preview(root,project),oldSource=new URL('./runtime/scenes/'+shot.id+'.mjs',oldUrl).href;
+    const before=await (await fetch(oldSource)).text();
+    const next=await store.commit(root,{...project,revision:1},{[shot.id]:scene('#ff0000')},{expectedRevision:0});
+    const newUrl=await second.preview(root,next),newSource=new URL('./runtime/scenes/'+shot.id+'.mjs',newUrl).href;
+    assert.notEqual(new URL(oldUrl).pathname,new URL(newUrl).pathname);
+    assert.equal(await (await fetch(oldSource)).text(),before);assert.match(before,/#0000ff/);assert.match(await (await fetch(newSource)).text(),/#ff0000/);
+    const privateFile=new URL('../../../../.studio/state.sqlite',oldUrl);assert.equal((await fetch(privateFile)).status,403);
+  }finally{await first.close();await second.close();await fs.rm(directory,{recursive:true,force:true});}
 });

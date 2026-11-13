@@ -6,7 +6,7 @@ import {join,resolve,dirname} from 'node:path';
 import {tmpdir} from 'node:os';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {createApplication,MemorySecrets,type Application} from '../src/app/application.ts';
 import {defaultSceneSource} from '../src/core/index.ts';
 import {detectEnvironment,VideoRenderer} from '../src/host/renderer.ts';
@@ -53,7 +53,7 @@ const gateway=createServer(async(req,res)=>{
       else if(body.model==='local-vision'){
         const images=parts.filter((part:any)=>part.type==='image_url').map((part:any)=>Buffer.from(part.image_url.url.split(',')[1],'base64'));
         assert.ok(images.length>0);for(const image of images)assert.deepEqual(image.subarray(0,8),Buffer.from([137,80,78,71,13,10,26,10]));receipt.imageCount=images.length;receipt.imageBytes=images.reduce((sum:number,image:Buffer)=>sum+image.length,0);
-        result='本地协议验收已收到实际关键帧 PNG；此固定回复不构成美术质量验收。';
+        result={pass:true,issues:[],evidence:'本地协议验收已收到实际关键帧 PNG；此固定回复不构成美术质量验收。'};
       }else throw new Error('未配置的模拟文本模型');
       json({choices:[{message:{content:typeof result==='string'?result:JSON.stringify(result)},finish_reason:'stop'}]});return;
     }
@@ -76,7 +76,7 @@ try{
   await execute(environment.ffmpegPath,['-hide_banner','-loglevel','error','-f','lavfi','-i','sine=frequency=660:sample_rate=48000:duration=1.25','-ac','2','-c:a','pcm_s16le','-y',fixtureFiles.speech]);
   await new Promise<void>(accept=>gateway.listen(0,'127.0.0.1',accept));baseUrl='http://127.0.0.1:'+(gateway.address() as {port:number}).port;
   app=await createApplication({dataDirectory:join(temporary,'app'),credentials:new MemorySecrets()});
-  async function call<T=StudioSnapshot>(endpoint:string,payload:unknown={}):Promise<T>{const result=await app!.route(endpoint,payload);if(!result.ok)throw Object.assign(new Error(result.error.message),{code:result.error.code});return result.value as T;}
+  async function call<T=StudioSnapshot>(endpoint:string,payload:unknown={}):Promise<T>{const write=new Set(['create','save','saveSource','export','workflows.run']);const values=payload as Record<string,unknown>;const result=await app!.route(endpoint,write.has(endpoint)?{...values,operationId:randomUUID(),...(endpoint==='create'?{expectedRevision:null}:{})}:payload);if(!result.ok)throw Object.assign(new Error(result.error.message),{code:result.error.code});return result.value as T;}
   async function configure(protocol:ModelProtocol,model:string,role:ModelRole,inputModalities:Modality[],outputModalities:Modality[],parameters:Record<string,string|number|boolean>={}){
     const connection=await call<ProviderConnection>('models.connection.save',{name:'本地验收 '+role,protocol,baseUrl:baseUrl+'/v1',auth:'bearer',apiKey:'local-fixture-only',concurrency:2});
     const definition=await call<ModelDefinition>('models.model.save',{connectionId:connection.id,model,name:role,inputModalities,outputModalities,parameters});await call('models.role.bind',{role,modelId:definition.id});
@@ -84,14 +84,14 @@ try{
   await configure('chat-completions','local-director','director',['text'],['text']);await configure('chat-completions','local-scene','scene',['text'],['text']);
   await configure('chat-completions','local-vision','vision',['text','image'],['text'],{enableVision:true,maxVisionDimension:1024});
   await configure('images','local-image','image',['text'],['image']);await configure('video-gateway','local-video','video',['text'],['video']);await configure('speech','local-speech','speech',['text'],['audio'],{voice:'fixture-voice',speed:1});
-  let snapshot=await call('create',{title:'多模态协作完整成片验收'}),project=snapshot.project!;const id=project.id;
+  let snapshot=await call('create',{title:'多模态协作完整成片验收'}),project=snapshot.project!;const id=project.id;const session=await call<{id:string}>('sessions.create',{projectId:id,name:'本地成片验收'});
   project.target={width:320,height:180,fps:{num:12,den:1},audioMode:'mixed',quality:'small'};project.targetDuration=6;
   project.shots.forEach((shot,index)=>{shot.durationFrames=24;shot.title=['代码镜头','生成图片镜头','生成视频镜头'][index]!;shot.params.text=shot.title;shot.params.subtitle='本地协议与真实媒体验收';shot.params.fontSize=108;shot.params.motion='none';});
   snapshot=await call('save',{projectId:id,expectedRevision:project.revision,project});await call('environment',{projectId:id,browserPath:environment.browserPath,ffmpegPath:environment.ffmpegPath,ffprobePath:environment.ffprobePath});
   passed('六类模型角色通过应用配置接口分别绑定');
   for(const [index,visual]of (['code','image','video'] as const).entries()){
     project=(await call('current',{projectId:id})).project!;const before=project.revision;
-    const started=await call<WorkflowRecord>('workflows.run',{projectId:id,expectedRevision:before,prompt:'制作 '+project.shots[index]!.title,shotIds:[project.shots[index]!.id],visual,narration:true,review:true,allowImageUpload:true,maxTasks:8});
+    const started=await call<WorkflowRecord>('workflows.run',{sessionId:session.id,projectId:id,expectedRevision:before,prompt:'制作 '+project.shots[index]!.title,shotIds:[project.shots[index]!.id],visual,narration:true,review:true,allowImageUpload:true,maxTasks:8});
     const complete=await waitFor(()=>call<WorkflowRecord>('workflows.get',{workflowId:started.id}),record=>record.status!=='running',visual+' 工作流');
     assert.equal(complete.status,'complete',complete.error);assert.equal(complete.committedRevision,before+1);assert.ok(complete.steps.some(step=>step.kind==='speech'&&step.status==='complete'));assert.equal(complete.steps.find(step=>step.kind==='review')?.frameEvidence?.length,1);workflows.push(complete);
     passed(visual+' 镜头完成导演、制作、已配置 Speech 和实际关键帧检查',{workflowId:complete.id,revision:complete.committedRevision});
@@ -116,6 +116,6 @@ try{
   const speech=requests.filter(request=>request.path==='/v1/audio/speech'),vision=requests.filter(request=>request.model==='local-vision');assert.equal(speech.length,3);assert.ok(speech.every(request=>request.authenticated&&request.model==='local-speech'));assert.equal(vision.length,3);assert.ok(vision.every(request=>request.imageCount===1&&request.imageBytes!>100));assert.ok(requests.filter(request=>request.path.startsWith('/artifacts/')).every(request=>!request.authenticated));
   const media=await call<{tasks:MediaTask[]}>('media.list',{projectId:id});assert.ok(media.tasks.every(task=>task.phase==='complete'));
   passed('Speech 使用配置模型与认证，媒体下载不携带模型凭据，生成任务均已采用',{speechRequests:speech.length,imageRequests:requests.filter(request=>request.path==='/v1/images/generations').length,videoSubmissions:requests.filter(request=>request.method==='POST'&&request.path==='/v1/media/jobs').length,visionImageBytes:vision.map(request=>request.imageBytes)});
-  report={...report,status:'PASS',projectId:id,film:{path:filmPath,revision:film.revision,width:film.width,height:film.height,frameCount:film.frameCount,duration:film.duration,sha256:createHash('sha256').update(await readFile(filmPath)).digest('hex'),qa:{status:film.qa!.status,codec:film.qa!.codec,pixelFormat:film.qa!.pixelFormat,fps:film.qa!.fps,audioCodec:film.qa!.audioCodec,audioStreams:film.qa!.audioStreams,sampleRate:film.qa!.sampleRate,channels:film.qa!.channels,arbitrarySeek:film.qa!.arbitrarySeek,coldReload:film.qa!.coldReload},audioRms:rms},frames:frameFiles,workflows:workflows.map(workflow=>({id:workflow.id,visual:workflow.request.visual,status:workflow.status,revision:workflow.committedRevision,steps:workflow.steps.map(step=>({kind:step.kind,status:step.status,frameEvidence:step.frameEvidence}))})),editableRevision:snapshot.project!.revision,requests};
+  report={...report,status:'PASS',projectId:id,film:{path:filmPath,revision:film.revision,width:film.width,height:film.height,frameCount:film.frameCount,duration:film.duration,sha256:createHash('sha256').update(await readFile(filmPath)).digest('hex'),qa:{status:film.qa!.status,codec:film.qa!.codec,pixelFormat:film.qa!.pixelFormat,fps:film.qa!.fps,audioCodec:film.qa!.audioCodec,audioStreams:film.qa!.audioStreams,sampleRate:film.qa!.sampleRate,channels:film.qa!.channels,arbitrarySeek:film.qa!.arbitrarySeek,coldReload:film.qa!.coldReload},audioRms:rms},frames:frameFiles,workflows:workflows.map(workflow=>({id:workflow.id,visual:workflow.request.visual,status:workflow.status,revision:workflow.committedRevision,steps:workflow.steps.map(step=>({kind:step.kind,status:step.status,frameEvidence:step.frameEvidence,validation:step.validation}))})),editableRevision:snapshot.project!.revision,requests};
 }catch(error){report={...report,status:'FAIL',error:error instanceof Error?error.stack:String(error),requests};process.exitCode=1;console.error(error);}
 finally{rendererPrototype.mediaQa=normalMediaQa;await app?.dispose();gateway.closeAllConnections();if(gateway.listening)await new Promise<void>(accept=>gateway.close(()=>accept()));await rm(temporary,{recursive:true,force:true});await writeFile(join(output,'report.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify({status:report.status,report:join(output,'report.json'),checks:checks.length}));}
