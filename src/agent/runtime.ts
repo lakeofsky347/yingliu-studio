@@ -45,7 +45,7 @@ export class AgentRuntime {
   async run(taskId:string,signal?:AbortSignal):Promise<AgentTask>{
     if(this.closed)throw agentError('RUNTIME_CLOSED','智能体运行时已关闭');
     const active=this.running.get(taskId);
-    if(active){let settled=false;active.promise.then(()=>{settled=true;},()=>{settled=true;});await Promise.resolve();if(!settled&&this.running.get(taskId)===active)return active.promise;}
+    if(active){let settled=false;active.promise.then(()=>{settled=true;},()=>{settled=true;});await Promise.resolve();if(!settled&&this.running.get(taskId)===active&&!stopped.has((await this.repository.getTask(taskId)).status))return active.promise;}
     const controller=new AbortController(),abort=()=>controller.abort(signal?.reason);signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
     const promise=this.execute(taskId,controller).finally(()=>{signal?.removeEventListener('abort',abort);if(this.running.get(taskId)?.promise===promise)this.running.delete(taskId);});
     void promise.then(task=>{if(!this.closed&&task.status==='awaiting-acceptance')void this.schedule().catch(()=>{});},()=>{});

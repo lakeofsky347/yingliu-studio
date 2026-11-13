@@ -242,7 +242,7 @@ export class AgentService {
         const review = await this.selfCheck(run, signal);
         if (review && !review.pass) { run.messages.push({ role: 'user', content: `自检（第 ${run.reviewRounds} 轮）发现问题，请修复后再总结：\n${review.text}` }); await this.save(run); continue; }
       }
-      run.status = 'complete'; run.final = turn.content; run.message = '已完成'; await this.store.trace(run.id, { event: 'run.complete', usage: run.usage }); await this.save(run); return;
+      await this.store.trace(run.id, { event: 'run.complete', usage: run.usage }); run.status = 'complete'; run.final = turn.content; run.message = '已完成'; await this.save(run); return;
     }
   }
 
