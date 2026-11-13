@@ -9,7 +9,7 @@ import {AgentDatabase} from '../agent/database.ts';
 import type {ValidationReceipt} from '../agent/contracts.ts';
 import type {SceneSource,VideoProject,EnvironmentSettings} from '../shared/types.ts';
 import {ProjectStore,projectPath,validateStoredProject} from './store.ts';
-import {VideoRenderer} from './renderer.ts';
+import {validatePhase,VideoRenderer} from './renderer.ts';
 
 export interface CandidateInput {project:VideoProject;sources:Record<string,SceneSource>}
 export {contentHash as inputHash} from '../agent/repository.ts';
@@ -35,7 +35,7 @@ export async function validateCandidate(input:CandidateInput,root:string|undefin
   // Full source content is part of the receipt identity, including unchanged shots.
   for(const shot of candidate.project.shots??[])if(!candidate.sources[shot.id]&&root)candidate.sources[shot.id]=await store.readSource(root,shot,candidate.project.revision);
   const receipt:ValidationReceipt={id:randomUUID(),candidateHash:candidateHash(candidate),baseRevision:candidate.project.revision,status:'failed',checks,frames,createdAt:new Date().toISOString(),validatorVersion:'studio-candidate-v1'};
-  const check=async(id:string,work:()=>void|Promise<void>)=>{try{signal?.throwIfAborted();await work();checks.push({id,status:'passed'});}catch(error){signal?.throwIfAborted();checks.push({id,status:'failed',message:error instanceof Error?error.message:String(error)});}};
+  const check=async(id:string,work:()=>void|Promise<void>)=>{validatePhase(id,'start');try{signal?.throwIfAborted();await work();checks.push({id,status:'passed'});validatePhase(id,'end passed');}catch(error){signal?.throwIfAborted();const message=error instanceof Error?error.message:String(error);checks.push({id,status:'failed',message});validatePhase(id,'end failed '+message);}};
   await check('structure',()=>{validateStoredProject(candidate.project);const result=validateProject(candidate.project);if(!result.ok)throw new Error(result.errors.join('\n'));compileSpec(candidate.project);});
   await check('syntax',async()=>{for(const shot of candidate.project.shots){const source=candidate.sources[shot.id];if(!source||typeof source.html!=='string'||typeof source.css!=='string'||typeof source.js!=='string')throw new Error('候选缺少完整源码：'+shot.id);await syntax(source.js,signal);}});
   await check('assets',async()=>{for(const asset of candidate.project.assets)for(const file of [asset.path,asset.originalPath])if(file){if(!root)throw new Error('新工程候选引用尚未导入的素材：'+file);if(!(await stat(await projectPath(root,file))).isFile())throw new Error('素材不可读：'+file);}});

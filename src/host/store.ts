@@ -383,7 +383,9 @@ export class ProjectStore {
       const failure=error as {code?:string;statementIndex?:number};
       if(failure.statementIndex!==undefined&&failure.statementIndex<fenceCount)throw Object.assign(new Error('任务执行租约已失效或任务已有成功提交，拒绝重复发布'),{code:taskFenced&&failure.statementIndex===0?'LEASE_LOST':'TASK_LEASE_LOST'});
       if(creationLease&&failure.statementIndex===fenceCount)throw Object.assign(new Error('工程创建已由新执行者接管，拒绝旧结果'),{code:'CREATE_LEASE_LOST'});
-      if(failure.code==='DB_CONFLICT')throw revisionConflict();throw error;
+      if(failure.code==='DB_CONFLICT'||failure.code==='DB_BUSY')throw revisionConflict();
+      if(failure.code==='DATABASE_WORKER_EXIT'&&previousRevision!==undefined){const head=await this.withDatabase(root,database=>database.query<{revision:number}>('SELECT revision FROM store_head WHERE singleton=1'));if(head[0]&&head[0].revision!==previousRevision)throw revisionConflict();}
+      throw error;
     }
     await this.writeDatabaseMarker(root);
   }

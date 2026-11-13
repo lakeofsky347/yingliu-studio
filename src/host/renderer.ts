@@ -26,10 +26,13 @@ export function detectEnvironment(settings:Partial<EnvironmentSettings>={},optio
 function hash(buffer:Buffer|string):string { return createHash('sha256').update(buffer).digest('hex'); }
 function json(value:unknown):string { return JSON.stringify(value,null,2)+'\n'; }
 function aborted(signal?:AbortSignal):void { if(signal?.aborted)throw new Error('Task cancelled'); }
+export function validatePhase(step:string,detail=''):void{console.error(`[validate-phase] ${new Date().toISOString()} ${step}${detail?' '+detail:''}`);}
 async function closeBrowser(browser:Browser):Promise<void>{
+  validatePhase('closeBrowser','start');
   const pid=(browser as Browser&{process?:()=>{pid?:number}|null}).process?.()?.pid;
   await Promise.race([browser.close().catch(()=>undefined),new Promise(resolve=>setTimeout(resolve,8_000))]);
   if(pid){try{process.kill(pid,'SIGKILL');}catch{/* the browser already exited */}}
+  validatePhase('closeBrowser','end');
 }
 function keyFrames(spec:VideoSpec):number[] { return [...new Set(spec.shots.flatMap(shot=>[shot.startFrame,Math.floor((shot.startFrame+shot.endFrame-1)/2),shot.endFrame-1]))].sort((a,b)=>a-b); }
 function safeId(id:string):string { if(!/^[a-zA-Z0-9_-]{1,100}$/.test(id))throw new Error('Unsafe scene ID');return id; }
@@ -147,7 +150,9 @@ export class VideoRenderer {
   }
   private async openPage(url:string,spec:VideoSpec,settings:EnvironmentSettings,issues:RenderIssue[],signal?:AbortSignal):Promise<{browser:Browser;page:Page;removeAbort:()=>void}> {
     aborted(signal);const env=detectEnvironment(settings);if(!env.browserAvailable)throw new Error('Chrome/Chromium unavailable. Set browserPath in environment settings.');
+    validatePhase('openPage','start');
     await fs.access(env.browserPath,constants.X_OK);
+    validatePhase('openPage','launch');
     // 逐帧契约要求同一帧可复现：GPU 光栅的 2D canvas 在不同页面状态下会出现 ±1 的采样差异，
     // 会让逆序 seek / 冷启动的字节比对偶发失败。固定用 Skia 软件光栅画 2D canvas，
     // 合成与 WebGL 仍走原路径，渲染结果与截图因此稳定可复现。
@@ -166,17 +171,21 @@ export class VideoRenderer {
       page.on('pageerror',error=>issues.push({message:error.message}));
       page.on('console',message=>{if(message.type()==='error')issues.push({message:message.text()});});
       page.on('response',response=>{if(response.status()>=400)issues.push({message:'HTTP '+response.status()+': '+new URL(response.url()).pathname});});
+      validatePhase('openPage','goto');
       await page.goto(url,{waitUntil:'load',timeout:30_000});
+      validatePhase('openPage','wait-runtime');
       await page.waitForFunction(()=>!!(window as any).__VIDEO_WORKPACK__);
       const ready=await deadline(page.evaluate(async()=>{
         try{await (window as any).__VIDEO_WORKPACK__.ready();return {ok:true};}
         catch(error){const e=error as any;return {ok:false,message:e.message,shotId:e.shotId};}
       }),'Scene ready');
       if(!ready.ok){issues.push({shotId:ready.shotId,message:ready.message??'Renderer ready failed'});throw new Error(ready.message);}
+      validatePhase('openPage','end');
       return {browser,page,removeAbort:()=>signal?.removeEventListener('abort',cancel)};
     }catch(error){signal?.removeEventListener('abort',cancel);await closeBrowser(browser);this.browsers.delete(browser);throw error;}
   }
   private async frame(page:Page,spec:VideoSpec,frame:number):Promise<{buffer:Buffer;shotId:string}> {
+    validatePhase('frame',`start ${frame}`);
     const result=await deadline(page.evaluate(async input=>{
       try{
         const info=await (window as any).__VIDEO_WORKPACK__.renderFrame(input);
@@ -185,7 +194,9 @@ export class VideoRenderer {
       }catch(error){const e=error as any;return {ok:false,message:e.message,shotId:e.shotId,frame:e.frame};}
     },{frame,fps:spec.target.fps}),'Frame '+frame);
     if(!result.ok){const error=new Error(result.message) as Error&RenderIssue;error.shotId=result.shotId;error.frame=result.frame;throw error;}
-    return {buffer:await page.screenshot({type:'png',clip:{x:0,y:0,width:spec.target.width,height:spec.target.height},timeout:30_000}),shotId:result.info.sceneId};
+    const captured={buffer:await page.screenshot({type:'png',clip:{x:0,y:0,width:spec.target.width,height:spec.target.height},timeout:30_000}),shotId:result.info.sceneId};
+    validatePhase('frame',`end ${frame}`);
+    return captured;
   }
   async capture(root:string,project:VideoProject,settings:EnvironmentSettings,frame:number,signal?:AbortSignal):Promise<FrameCapture&{url:string}>{
     const {spec,urlPath}=await this.prepare(root,project),errors:RenderIssue[]=[];aborted(signal);

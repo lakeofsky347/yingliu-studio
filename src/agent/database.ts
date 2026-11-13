@@ -78,9 +78,8 @@ function shutdown(pool:Pool):Promise<void> {
     try{child.send({id,kind:'close',payload:null});}catch{/* the process is already gone */}
     await Promise.race([closed,delay(1500)]);
     const exited=new Promise<void>(resolve=>{if(child.exitCode!==null||child.signalCode!==null)resolve();else child.once('exit',()=>resolve());});
+    // Kill only this process. A path-wide search also stops the other process that is racing the same commit.
     if(pool.processId)forceStop(pool.processId);
-    if(process.platform==='win32'&&child.exitCode===null&&child.signalCode===null&&!pool.key.startsWith(':memory:')){
-      try{execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command','Get-CimInstance Win32_Process -Filter "Name=\'node.exe\'" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($env:YL_SQLITE) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }'],{env:{...process.env,YL_SQLITE:pool.key},stdio:'ignore',windowsHide:true,timeout:8000});}catch{/* no matching process */}}
     await Promise.race([exited,delay(3000)]);
     child.unref();try{child.disconnect();}catch{/* the IPC channel is already gone */}
     failPending(pool,Object.assign(new Error('Database has been closed'),{code:'DATABASE_CLOSED'}));
