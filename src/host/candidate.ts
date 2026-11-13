@@ -1,6 +1,8 @@
 import {randomUUID} from 'node:crypto';
 import {spawn} from 'node:child_process';
-import {stat} from 'node:fs/promises';
+import {mkdtemp,rm,stat,writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {validateProject,compileSpec} from '../core/index.ts';
 import {candidateHash} from '../agent/repository.ts';
 import {AgentDatabase} from '../agent/database.ts';
@@ -13,11 +15,20 @@ export interface CandidateInput {project:VideoProject;sources:Record<string,Scen
 export {contentHash as inputHash} from '../agent/repository.ts';
 const schema='CREATE TABLE IF NOT EXISTS host_validation_receipts (id TEXT PRIMARY KEY, candidate_hash TEXT NOT NULL, receipt_json TEXT NOT NULL)';
 function syntax(js:string,signal?:AbortSignal):Promise<void>{
-  return new Promise((resolve,reject)=>{
-    const child=spawn(process.execPath,['--check','--input-type=module'],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1'},stdio:['pipe','ignore','pipe'],signal});
-    let errors='';child.stderr.on('data',chunk=>{if(errors.length<8000)errors+=String(chunk);});
-    child.once('error',reject);child.once('close',code=>code===0?resolve():reject(new Error(errors||'镜头源码语法无效')));child.stdin.on('error',()=>{});child.stdin.end(js);
-  });
+  // Windows often never delivers stdin EOF to `node --check`, so the child waits forever and验收停在 validating。
+  return mkdtemp(join(tmpdir(),'yingliu-syntax-')).then(directory=>new Promise<void>((resolve,reject)=>{
+    const file=join(directory,'scene.mjs');let settled=false;
+    const finish=(error?:Error)=>{if(settled)return;settled=true;clearTimeout(timer);void rm(directory,{recursive:true,force:true});error?reject(error):resolve();};
+    const timer=setTimeout(()=>{child?.kill('SIGKILL');finish(new Error('镜头源码语法检查超时'));},10_000);
+    let child:ReturnType<typeof spawn>|undefined;
+    writeFile(file,js).then(()=>{
+      if(signal?.aborted){finish(new Error('Task cancelled'));return;}
+      child=spawn(process.execPath,['--check',file],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1'},stdio:['ignore','ignore','pipe'],windowsHide:true,signal});
+      let errors='';child.stderr?.on('data',chunk=>{if(errors.length<8000)errors+=String(chunk);});
+      child.once('error',error=>finish(error));
+      child.once('close',code=>finish(code===0?undefined:new Error(errors||'镜头源码语法无效')));
+    }).catch(error=>finish(error instanceof Error?error:new Error(String(error))));
+  }));
 }
 export async function validateCandidate(input:CandidateInput,root:string|undefined,databasePath:string,store:ProjectStore,renderer:VideoRenderer,settings:EnvironmentSettings,signal?:AbortSignal):Promise<ValidationReceipt>{
   signal?.throwIfAborted();const candidate=structuredClone(input),checks:ValidationReceipt['checks']=[],frames:ValidationReceipt['frames']=[];

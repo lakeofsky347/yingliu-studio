@@ -47,7 +47,8 @@ export class AgentRuntime {
     const active=this.running.get(taskId);
     if(active){let settled=false;active.promise.then(()=>{settled=true;},()=>{settled=true;});await Promise.resolve();if(!settled&&this.running.get(taskId)===active)return active.promise;}
     const controller=new AbortController(),abort=()=>controller.abort(signal?.reason);signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
-    const promise=this.execute(taskId,controller).finally(async()=>{signal?.removeEventListener('abort',abort);if(this.running.get(taskId)?.promise===promise)this.running.delete(taskId);const task=await this.repository.getTask(taskId);if(!this.closed&&task.status==='awaiting-acceptance')void this.schedule().catch(()=>{});});
+    const promise=this.execute(taskId,controller).finally(()=>{signal?.removeEventListener('abort',abort);if(this.running.get(taskId)?.promise===promise)this.running.delete(taskId);});
+    void promise.then(task=>{if(!this.closed&&task.status==='awaiting-acceptance')void this.schedule().catch(()=>{});},()=>{});
     this.running.set(taskId,{controller,promise});return promise;
   }
   private async schedule():Promise<void>{if((await this.repository.listCandidates()).filter(candidate=>['submitted','validated'].includes(candidate.status)).length>=AGENT_LIMITS.pendingAcceptance)return;for(const task of await this.repository.listTasks())if(task.parentTaskId&&task.status==='queued'&&!this.running.has(task.id)&&this.running.size<AGENT_LIMITS.activeChildren)void this.run(task.id).catch(()=>{});}
