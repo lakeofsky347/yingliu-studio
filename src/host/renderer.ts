@@ -263,6 +263,8 @@ export class VideoRenderer {
     try {
       const {spec,urlPath}=await this.prepare(root,project),url=(await this.server(root)).origin+urlPath;
       connection=await this.openPage(url,spec,settings,errors,signal);
+      // 冷启动的第一轮截图可能赶在字体和软件光栅稳定之前，逆序 seek 与重新加载会对不上。先丢掉这一轮。
+      for(const frame of keyFrames(spec)){aborted(signal);await this.frame(connection.page,spec,frame);}
       for(const frame of keyFrames(spec)){
         aborted(signal);const result=await this.frame(connection.page,spec,frame);
         const file=path.join(reportRoot,String(frame).padStart(6,'0')+'.png');await fs.writeFile(file,result.buffer);
