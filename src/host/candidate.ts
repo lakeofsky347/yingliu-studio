@@ -50,7 +50,11 @@ export async function validateCandidate(input:CandidateInput,root:string|undefin
     await renderer.checkCandidateAudio(root,candidate.project,settings,signal);
   });
   receipt.status=checks.every(check=>check.status==='passed')?'passed':'failed';
-  const db=new AgentDatabase(databasePath);try{await db.transaction([{sql:schema},{sql:'INSERT INTO host_validation_receipts(id,candidate_hash,receipt_json) VALUES(?,?,?)',params:[receipt.id,receipt.candidateHash,JSON.stringify(receipt)]}]);}finally{await db.close();}
+  validatePhase('receipt','start');
+  const db=new AgentDatabase(databasePath);
+  try{await db.transaction([{sql:schema},{sql:'INSERT INTO host_validation_receipts(id,candidate_hash,receipt_json) VALUES(?,?,?)',params:[receipt.id,receipt.candidateHash,JSON.stringify(receipt)]}]);validatePhase('receipt','end');}
+  catch(error){validatePhase('receipt','failed '+(error instanceof Error?error.message:String(error)));throw error;}
+  finally{await db.close();}
   return receipt;
 }
 export async function readValidation(databasePath:string,id:string):Promise<ValidationReceipt|undefined>{
