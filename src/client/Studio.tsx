@@ -79,7 +79,7 @@ function Workbench({controller,onHome,onNew,onOpen,onConfigure,modelConfigured,e
   const lockReason=state.conflict?'请先处理保存冲突':externallyBusy?'创作对话正在处理工程':running?taskLabel(task.kind)+'中':'正在处理工程操作';
 
   const root=useRef<HTMLElement>(null),canvas=useRef<HTMLCanvasElement>(null),minimap=useRef<HTMLCanvasElement>(null);
-  const graph=useRef<LiteGraphEditor|null>(null);
+  const graph=useRef<LiteGraphEditor|null>(null),autoPreviewAttempt=useRef('');
   const layout=useStudioLayout(root);
   const [playhead]=useState(createPlayhead);
   const [stage,setStage]=useState<StageMode>('monitor');
@@ -165,6 +165,18 @@ function Workbench({controller,onHome,onNew,onOpen,onConfigure,modelConfigured,e
   },[state.focusSerial]);
 
   useEffect(()=>graph.current?.clearShotThumbs(),[project?.id,project?.revision,snapshot?.previewUrl,snapshot?.previewRevision]);
+  useEffect(()=>{
+    if(!project||!graphCheck?.ok||(snapshot?.previewUrl&&snapshot.previewRevision===project.revision)||
+      busy||state.previewing||state.dirty||state.saving||state.conflict||state.sourceDraft)return;
+    const key=`${project.id}:${project.revision}`;
+    if(autoPreviewAttempt.current===key)return;
+    const timer=setTimeout(async()=>{
+      if(autoPreviewAttempt.current===key)return;
+      const result=await controller.refreshPreview(project.id,project.revision);
+      if(result!=='superseded')autoPreviewAttempt.current=key;
+    },1200);
+    return()=>clearTimeout(timer);
+  },[project?.id,project?.revision,graphCheck?.ok,snapshot?.previewUrl,snapshot?.previewRevision,busy,state.previewing,state.dirty,state.saving,state.conflict,state.sourceDraft,controller]);
   useEffect(()=>{
     const editor=graph.current;
     const revision=snapshot?.previewRevision;
@@ -281,7 +293,7 @@ function Workbench({controller,onHome,onNew,onOpen,onConfigure,modelConfigured,e
   const steps:StepInfo[]=[
     {id:'storyboard',label:'分镜',state:runningKind==='storyboard'?'running':graphCheck?.ok?'done':ordered.length?'warning':'current',hint:graphCheck?.ok?`${ordered.length} 个镜头，主链完整`:'查看分镜画布'},
     {id:'scenes',label:'画面',state:runningKind==='scenes'||runningKind==='modify'?'running':hasPreview?'done':graphCheck?.ok?'current':'todo',hint:'查看镜头源码'},
-    {id:'preview',label:'预览',state:runningKind==='preview'?'running':fresh?'done':hasPreview?'stale':'todo',hint:fresh?'预览与当前工程一致':'查看影片预览'},
+    {id:'preview',label:'预览',state:runningKind==='preview'||state.previewing?'running':fresh?'done':hasPreview?'stale':'todo',hint:fresh?'预览与当前工程一致':'查看影片预览'},
     {id:'export',label:'成片',state:runningKind==='export'?'running':latest?.revision===project.revision?'done':latest?'stale':fresh?'current':'todo',hint:latest?`最近导出 v${latest.revision}`:'查看导出成片'},
   ];
   const menu:MenuItem[]=[

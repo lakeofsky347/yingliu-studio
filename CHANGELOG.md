@@ -1,5 +1,10 @@
 # 版本记录
 
+## 未发布 — 1.0.0 工作台对齐补全
+
+- 补全 1.2 秒防抖后台自动刷新预览（`controller.refreshPreview()` / `state.previewing` / `Studio.tsx` 与 `Stage.tsx`）：保存后约 1.2 秒在后台准备预览，不置全局 `pending` 也不阻塞连续编辑。
+- 新增 `tests/studio-interaction.test.ts` 真实 Chromium 工作台交互回归测试及 `docs/FRONTEND-REDESIGN.md`。
+
 ## 0.5.0 — 2026-10-22
 
 结构化创作计划与一致性（方案见 docs/ROADMAP-0.5.md）：

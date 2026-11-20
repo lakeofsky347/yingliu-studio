@@ -4,6 +4,7 @@ import {mkdtemp,readFile,writeFile,mkdir,rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {AppBackend} from '../src/app/backend.ts';
+import {StudioController} from '../src/client/controller.ts';
 import {VideoRenderer} from '../src/host/renderer.ts';
 import {createProject,defaultShot,defaultSceneSource} from '../src/core/index.ts';
 import {AppSceneGenerator} from '../src/host/generator.ts';
@@ -40,6 +41,40 @@ test('explicit preparation repairs the saved preview without changing its revisi
     assert.equal(ready.project!.revision,0);assert.equal(ready.task?.id,first.task?.id);
     assert.equal(check.mock.callCount(),0);
   }finally{await f.close();}
+});
+
+test('editor autosave commits before preparing a new preview and keeps the previous preview coherent',async t=>{
+  const preview=t.mock.method(VideoRenderer.prototype,'preview');
+  const audio=t.mock.method(VideoRenderer.prototype,'audioPreview',async(_root:string,project:VideoProject)=>`http://127.0.0.1:1/audio.wav?revision=${project.revision}`);
+  const check=t.mock.method(VideoRenderer.prototype,'check');
+  const f=await fixture(),controller=new StudioController(f.backend);
+  try{
+    const first=await f.backend.call<StudioSnapshot>('create',{title:'后台准备预览'}),projectId=first.project!.id;
+    await controller.load();
+    assert.ok(controller.edit({...first.project!,title:'已保存的编辑'}));
+    await controller.flush();
+    const saved=controller.getSnapshot().snapshot!;
+    assert.equal(saved.project!.revision,1);
+    assert.equal(JSON.parse(await readFile(join(first.root!,'project.json'),'utf8')).title,'已保存的编辑');
+    assert.equal(saved.previewRevision,first.previewRevision);
+    assert.equal(saved.previewUrl,first.previewUrl);
+    assert.equal(saved.audioUrl,first.audioUrl);
+    assert.equal(preview.mock.callCount(),1);
+    assert.equal(audio.mock.callCount(),1);
+
+    assert.equal(await controller.refreshPreview(projectId,1),'prepared');
+    const prepared=controller.getSnapshot().snapshot!;
+    assert.equal(prepared.project!.revision,1);
+    assert.equal(prepared.previewRevision,1);
+    assert.notEqual(prepared.previewUrl,first.previewUrl);
+    assert.notEqual(prepared.audioUrl,first.audioUrl);
+    assert.equal(preview.mock.callCount(),2);
+    assert.equal(audio.mock.callCount(),2);
+    assert.equal(check.mock.callCount(),0);
+
+    const direct=await f.backend.call<StudioSnapshot>('save',{projectId,expectedRevision:1,project:{...prepared.project!,title:'直接保存'}});
+    assert.equal(direct.previewRevision,2);
+  }finally{await controller.dispose();await f.close();}
 });
 
 test('blank project, same-revision concurrent commands, stable shot IDs and CAS errors',async()=>{

@@ -92,3 +92,31 @@ test('an unsaved source draft blocks project navigation but can still be saved',
   await controller.action('open',{path:'/other'});assert.equal(requests.includes('open'),false);assert.match(controller.getSnapshot().error,/源码尚未保存/);const selected=controller.getSnapshot().selected;controller.select('another-shot');assert.equal(controller.getSnapshot().selected,selected);
   await controller.saveSource(snapshot.project!.shots[0]!.id,{html:'<p>已保存</p>',css:'',js:''});assert.equal(requests.includes('saveSource'),true);controller.setSourceDraftDirty(false);assert.equal(controller.hasUnsavedChanges,false);await controller.dispose();
 });
+
+test('a preview failure is ignored if a source draft supersedes the request',async()=>{
+  const snapshot=initialSnapshot(),project=snapshot.project!;
+  const first=deferred<StudioSnapshot>(),started=deferred<void>();
+  let previews=0;
+  const controller=new StudioController(apiFor(endpoint=>{
+    if(endpoint!=='preview')return structuredClone(snapshot);
+    if(++previews===1){started.resolve();return first.promise;}
+    if(previews===2)throw new Error('预览服务不可用');
+    return {...snapshot,previewRevision:project.revision,previewUrl:'http://localhost:1234/preview'};
+  }));
+  await controller.load();
+  try{
+    const preview=controller.refreshPreview(project.id,project.revision);
+    await started.promise;
+    controller.setSourceDraftDirty(true);
+    first.reject(new Error('旧预览请求失败'));
+    assert.equal(await preview,'superseded');
+    assert.equal(controller.getSnapshot().previewing,false);
+    assert.equal(controller.getSnapshot().error,'');
+
+    controller.setSourceDraftDirty(false);
+    assert.equal(await controller.refreshPreview(project.id,project.revision),'failed');
+    assert.equal(controller.getSnapshot().error,'预览服务不可用');
+    assert.equal(await controller.refreshPreview(project.id,project.revision),'prepared');
+    assert.equal(controller.getSnapshot().snapshot?.previewRevision,project.revision);
+  }finally{await controller.dispose();}
+});

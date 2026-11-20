@@ -43,13 +43,13 @@ export function Stage({project,snapshot,state,controller,playhead,layout,stageMo
         </>}
         <Button icon="plus" size="sm" disabled={locked} onClick={onAddShot} title="添加镜头" aria-label="添加镜头">镜头</Button>
         <span className="vs-separator"/>
-        <IconButton icon="refresh" label="刷新预览" title="检查资源并刷新预览" disabled={busy||locked||state.sourceDraft||!graphCheck?.ok} onClick={onRefreshPreview}/>
+        <IconButton icon="refresh" label="刷新预览" title="检查资源并刷新预览" disabled={busy||locked||state.previewing||state.sourceDraft||!graphCheck?.ok} onClick={onRefreshPreview}/>
         <button type="button" className={`vs-word-trigger ${wordOpen?'is-active':''}`} aria-expanded={wordOpen} onClick={()=>onWordOpen(!wordOpen)} title="用文字修改 · Ctrl / ⌘ K" aria-label="用文字修改"><Icon name="spark"/><span>用文字修改</span><kbd>⌘K</kbd></button>
       </div>
     </div>
     <div className="vs-stage-body">
       <div className="vs-stage-monitor" aria-hidden={stageMode==='canvas'||undefined}>
-        <Preview key={project.id} snapshot={snapshot} project={project} selectedShot={selectedShot} controller={controller} transport={playhead} focusFrame={state.focusFrame} focusSerial={state.focusSerial} busy={busy} syncing={state.saving||state.dirty} preparePreview={graphCheck?.ok&&!state.sourceDraft&&!state.conflict?()=>void controller.action('preview',{prepareOnly:true}):undefined}/>
+        <Preview key={project.id} snapshot={snapshot} project={project} selectedShot={selectedShot} controller={controller} transport={playhead} focusFrame={state.focusFrame} focusSerial={state.focusSerial} busy={busy} syncing={state.saving||state.dirty||state.previewing} preparePreview={graphCheck?.ok&&!state.sourceDraft&&!state.conflict?()=>void controller.action('preview',{prepareOnly:true}):undefined}/>
       </div>
       <div className="vs-stage-canvas" aria-hidden={stageMode==='monitor'||undefined}>
         <div className="vs-graph-shell"><canvas ref={canvasRef}/>

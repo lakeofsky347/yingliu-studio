@@ -156,7 +156,7 @@ export function Preview({snapshot,project,selectedShot,controller,focusFrame,foc
         {snapshot.previewUrl&&!ready&&!showOutput&&!previewError&&<span className="vs-preview-loading" aria-hidden="true"/>}
       <div className="vs-monitor-hud">
         <span className="vs-hud-chip" data-testid="current-shot-heading" data-shot-id={currentRange.shot?.id}>{shotLabel}</span>
-        {(outdated||syncing)&&<span className="vs-preview-badge"><i/>正在同步最新修改…</span>}
+        {(outdated||syncing)&&<span className="vs-preview-badge"><i/>{syncing?'正在同步最新修改…':'预览未更新'}</span>}
       </div>
       <button type="button" className="vs-monitor-expand" aria-label={expanded?"关闭大预览":"打开大预览"} title={expanded?"收起 · Esc":"大预览"} onClick={()=>setExpanded(!expanded)}><Icon name={expanded?'collapse':'expand'}/></button>
       </div>

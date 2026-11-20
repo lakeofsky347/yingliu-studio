@@ -119,19 +119,22 @@ export class StudioService {
   }
   private required(){if(!this.project||!this.root)throw new Error('请先新建或打开项目');return {project:this.project,root:this.root};}
   private assertIdle(){if(this.task?.status==='running')throw new Error('已有任务运行，请等待或取消');}
-  private async refreshPreview(){
+  private async refreshPreview(deferPreview=false){
     if(!this.project||!this.root)return;
     const project=this.project,root=this.root,revision=project.revision;
     const assetBaseUrl=await this.renderer.assetBaseUrl(root);
+    if(this.project!==project||this.root!==root)return;
+    this.assetBaseUrl=assetBaseUrl;
     for(const output of project.outputs){output.path=join(root,'exports',output.id,'video.mp4');output.url=new URL(`exports/${encodeURIComponent(output.id)}/video.mp4`,assetBaseUrl).href;}
-    try{compileSpec(project);}catch{if(this.project===project){this.previewUrl=null;this.previewRevision=null;this.audioUrl=null;}return;}
+    try{compileSpec(project);}catch{this.previewUrl=null;this.previewRevision=null;this.audioUrl=null;return;}
+    if(deferPreview)return;
     const previewUrl=await this.renderer.preview(root,project),audioUrl=await this.renderer.audioPreview(root,project,this.settings);
     // A slower old revision must never overwrite a newer preview's projection.
     if(this.project!==project||this.root!==root)return;
-    this.assetBaseUrl=assetBaseUrl;this.previewUrl=previewUrl;this.previewRevision=revision;this.audioUrl=audioUrl;
+    this.previewUrl=previewUrl;this.previewRevision=revision;this.audioUrl=audioUrl;
   }
-  private async refreshAfterCommit():Promise<void>{
-    try{await this.refreshPreview();}catch(error){
+  private async refreshAfterCommit(deferPreview=false):Promise<void>{
+    try{await this.refreshPreview(deferPreview);}catch(error){
       this.previewUrl=null;this.previewRevision=null;this.audioUrl=null;
       const message=await this.redact(error instanceof Error?error.message:String(error)),now=new Date().toISOString();
       const failed:RecordedTask={id:randomUUID(),kind:'preview',status:'failed',progress:0,message:'工程已保存，预览准备失败：'+message,error:message,startedAt:now,finishedAt:now,revision:this.required().project.revision,appRecordVersion:1,request:this.recordedRequest('preview',{})};
@@ -140,11 +143,11 @@ export class StudioService {
       try{await this.writeTaskJournal(this.required().root,failed);}catch{failed.message+='；任务日志写入失败，请检查工程目录权限';}
     }
   }
-  private async persist(next:VideoProject,sources:Record<string,SceneSource>={},label='编辑工程',historyGroup?:string,operation?:CommitOperation,expectedRevision=next.revision){
+  private async persist(next:VideoProject,sources:Record<string,SceneSource>={},label='编辑工程',historyGroup?:string,operation?:CommitOperation,expectedRevision=next.revision,deferPreview=false){
     const {root}=this.required();next=structuredClone(next);next.revision=expectedRevision+1;this.fitAudio(next);
     this.project=await this.store.commit(root,next,sources,{expectedRevision,label,historyGroup,operation});
-    // Rendering follows the durable commit. A preview failure leaves the new version undoable.
-    await this.refreshAfterCommit();
+    // An editor autosave can keep the previous preview until the workbench requests the new revision.
+    await this.refreshAfterCommit(deferPreview);
   }
   private async apply(data:any){
     this.assertIdle();const {root,project:current}=this.required();
@@ -328,7 +331,7 @@ export class StudioService {
       await this.initialized;if(this.disposed)throw new Error('应用服务已停止');await this.refreshHead();const data=(payload??{}) as any;
       const operation:CommitOperation|undefined=['operation.get','operation.receipt','operation.intent'].includes(endpoint)?undefined:typeof data.operation==='object'&&data.operation?data.operation:typeof data.operationId==='string'?{id:data.operationId,payloadHash:inputHash({endpoint,payload:{...data,operationId:undefined}})}:undefined;
       if(operation&&this.root){const prior=await this.store.operationReceipt(this.root,operation.id);if(prior){if(prior.payloadHash!==operation.payloadHash)throw Object.assign(new Error('operationId 已用于不同参数'),{code:'OPERATION_CONFLICT'});const snapshot=await this.snapshot();snapshot.project=await this.store.readProject(this.root,prior.committedRevision);return {ok:true,value:{...snapshot,operationReceipt:prior}};}}
-      const persist=(next:VideoProject,sources:Record<string,SceneSource>={},label='编辑工程',historyGroup?:string)=>this.persist(next,sources,label,historyGroup,operation,Number(data.expectedRevision??next.revision));
+      const persist=(next:VideoProject,sources:Record<string,SceneSource>={},label='编辑工程',historyGroup?:string,deferPreview=false)=>this.persist(next,sources,label,historyGroup,operation,Number(data.expectedRevision??next.revision),deferPreview);
       if(['save','apply','applyOperation','import','audio','generate','saveSource','restoreSource','undo','redo','rename','retry','job.retry','video.clip.save','video.clip.remove','video.clip.extract'].includes(endpoint))this.assertRevision(data,true);
       else if(['import','audio','generate','export','preview'].includes(endpoint)&&data.expectedRevision!==undefined)this.assertRevision(data);
       switch(endpoint){
@@ -351,7 +354,12 @@ export class StudioService {
           if(!data.project)for(const shot of this.project.shots)await this.store.markSourceGood(this.root,shot).catch(()=>{});await this.refreshAfterCommit();break;
         }
         case 'open':{this.assertIdle();const root=resolve(String(data.path)),project=await this.store.open(root);this.root=root;this.project=project;this.task=null;await this.recoverTask();await this.refreshAfterCommit();break;}
-        case 'save':{if(this.task?.status==='running'&&this.task.kind!=='export')this.assertIdle();const {project}=this.required();if(!data.project||data.project.id!==project.id)throw new Error('项目已切换，请刷新后重试');const next=structuredClone(data.project) as VideoProject;this.fitAudio(next);await persist({...next,outputs:project.outputs}, {},'保存工程');break;}
+        case 'save':{
+          if(this.task?.status==='running'&&this.task.kind!=='export')this.assertIdle();
+          const {project}=this.required();if(!data.project||data.project.id!==project.id)throw new Error('项目已切换，请刷新后重试');
+          const next=structuredClone(data.project) as VideoProject;this.fitAudio(next);
+          await persist({...next,outputs:project.outputs}, {},'保存工程',undefined,data.deferPreview===true);break;
+        }
         case 'apply':case 'applyOperation':await this.apply({...data,operation});break;
         case 'candidate.validate':{const candidate=data.candidate?.project?data.candidate:{project:data.candidate,sources:Object.fromEntries((data.sources??[]).map((item:any)=>[item.shotId,item.source]))};if(data.projectId)this.assertRevision(data,true);return {ok:true,value:await this.validateCandidate(candidate,data.signal)};}
         case 'import':{this.assertIdle();const {root,project}=this.required();const asset=await this.store.importAsset(root,data,this.settings);const next=structuredClone(project);next.assets.push(asset);next.graph.positions[asset.id]=[60,80+(next.assets.length-1)*180];await persist(next,{},'导入素材');break;}

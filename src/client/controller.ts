@@ -7,7 +7,7 @@ import type { AgentSession } from '../agent/contracts.ts';
 export interface EditUndo { available:()=>boolean; run:()=>Promise<boolean> }
 export interface ProjectHistory {canUndo:boolean;canRedo:boolean;entries:{id:string;label:string;createdAt:string;revision:number}[];cursor:number}
 export interface StudioState {
-  snapshot:StudioSnapshot|null;loading:boolean;pending:boolean;saving:boolean;dirty:boolean;sourceDraft:boolean;sourceDraftCount:number;draftSerial:number;conflict:boolean;styles:VideoStyle[];
+  snapshot:StudioSnapshot|null;loading:boolean;pending:boolean;previewing:boolean;saving:boolean;dirty:boolean;sourceDraft:boolean;sourceDraftCount:number;draftSerial:number;conflict:boolean;styles:VideoStyle[];
   agentSessionId:string|null;error:string;notice:string;scheme:'light'|'dark';selected:string|null;route:ModelRoute;
   canUndo:boolean;canRedo:boolean;history:ProjectHistory|null;localImages:Record<string,string>;focusFrame:number|null;focusSerial:number;
 }
@@ -39,7 +39,7 @@ export class StandaloneStudioApi implements StudioApi {
 }
 /** One owner for edits, persisted history, revision checks, and project task polling. */
 export class StudioController {
-  private state:StudioState={snapshot:null,loading:true,pending:false,saving:false,dirty:false,sourceDraft:false,sourceDraftCount:0,draftSerial:0,conflict:false,styles:[],agentSessionId:null,error:'',notice:'',scheme:'dark',selected:null,route:{provider:'',model:''},canUndo:false,canRedo:false,history:null,localImages:{},focusFrame:null,focusSerial:0};
+  private state:StudioState={snapshot:null,loading:true,pending:false,previewing:false,saving:false,dirty:false,sourceDraft:false,sourceDraftCount:0,draftSerial:0,conflict:false,styles:[],agentSessionId:null,error:'',notice:'',scheme:'dark',selected:null,route:{provider:'',model:''},canUndo:false,canRedo:false,history:null,localImages:{},focusFrame:null,focusSerial:0};
   private listeners=new Set<()=>void>();private disposed=false;
   private saveTimer:ReturnType<typeof setTimeout>|undefined;private pollTimer:ReturnType<typeof setTimeout>|undefined;
   private sourceDraftDirty=false;
@@ -157,7 +157,7 @@ export class StudioController {
     const serial=this.editSerial;this.saveFailed=false;
     const operation=(async()=>{try{
       const expectedRevision=this.serverProjectId===project.id?this.serverRevision:null;
-      const snapshot=await this.mutation<StudioSnapshot>('save',{project,expectedRevision});
+      const snapshot=await this.mutation<StudioSnapshot>('save',{project,expectedRevision,deferPreview:true});
       if(serial===this.editSerial){this.dirty=false;this.savedEditSerial=serial;this.accept(snapshot,false,true);this.update({saving:false,dirty:false,error:'',conflict:false});}
       else{this.accept(snapshot,true,true);this.update({error:''});}
       await this.refreshHistory();
@@ -175,6 +175,28 @@ export class StudioController {
       if(endpoint==='cancel'&&!request.expectedTaskId)throw new Error('没有可取消的任务，请刷新任务状态。');
       const snapshot=await (writes?this.mutation<StudioSnapshot>(endpoint,request):this.api.call<StudioSnapshot>(endpoint,request));this.accept(snapshot,false,['saveSource','restoreSource','import','rename'].includes(endpoint));await this.refreshHistory();this.update({notice,conflict:false,error:''});return true;
     }catch(error){this.update({error:message(error)});return false;}finally{this.update({pending:false});}
+  }
+  /** Prepare the saved revision's preview in the host command queue without blocking user edits. */
+  async refreshPreview(projectId:string,revision:number):Promise<'prepared'|'superseded'|'failed'>{
+    const ready=()=>!this.disposed&&!this.state.previewing&&!this.busy&&!this.hasUnsavedChanges&&!this.state.conflict
+      &&this.state.snapshot?.project?.id===projectId&&this.serverRevision===revision;
+    if(!ready())return 'superseded';
+    await this.flush();
+    if(!ready())return 'superseded';
+    const current=this.snapshotReadGuard(projectId);
+    const canApply=()=>current()&&!this.hasUnsavedChanges&&!this.state.conflict;
+    this.update({previewing:true});
+    try{
+      const snapshot=await this.api.call<StudioSnapshot>('preview',{projectId,expectedRevision:revision,prepareOnly:true});
+      if(!canApply()||snapshot.project?.id!==projectId||snapshot.project.revision!==revision)return 'superseded';
+      if(!snapshot.previewUrl||snapshot.previewRevision!==revision)throw new Error('未能准备已保存版本的预览，请刷新预览后重试。');
+      this.accept(snapshot,true);
+      return 'prepared';
+    }catch(error){
+      if(!canApply())return 'superseded';
+      this.update({error:message(error)});
+      return 'failed';
+    }finally{this.update({previewing:false});}
   }
   /** Background workflow refreshes never follow another project's global selection. */
   async refreshMediaProject():Promise<boolean>{
