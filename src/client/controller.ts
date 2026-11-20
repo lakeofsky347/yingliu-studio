@@ -4,6 +4,7 @@ import { SourceDraftStore, type SourceDraft } from './source-drafts.ts';
 import { PendingOperationRequests } from './agent-client.ts';
 import type { AgentSession } from '../agent/contracts.ts';
 
+export interface EditUndo { available:()=>boolean; run:()=>Promise<boolean> }
 export interface ProjectHistory {canUndo:boolean;canRedo:boolean;entries:{id:string;label:string;createdAt:string;revision:number}[];cursor:number}
 export interface StudioState {
   snapshot:StudioSnapshot|null;loading:boolean;pending:boolean;saving:boolean;dirty:boolean;sourceDraft:boolean;sourceDraftCount:number;draftSerial:number;conflict:boolean;styles:VideoStyle[];
@@ -42,7 +43,7 @@ export class StudioController {
   private listeners=new Set<()=>void>();private disposed=false;
   private saveTimer:ReturnType<typeof setTimeout>|undefined;private pollTimer:ReturnType<typeof setTimeout>|undefined;
   private sourceDraftDirty=false;
-  private editSerial=0;private dirty=false;private savingPromise:Promise<void>|null=null;private saveFailed=false;
+  private editSerial=0;private savedEditSerial=0;private dirty=false;private savingPromise:Promise<void>|null=null;private saveFailed=false;
   private polling=false;private actionEpoch=0;private snapshotReadSerial=0;private serverRevision:number|null=null;private serverProjectId:string|null=null;
   private creativeHandler:((kind:'storyboard'|'scenes'|'modify',instruction:string,shotId?:string)=>Promise<void>)|null=null;
   private readonly drafts:SourceDraftStore;
@@ -121,13 +122,32 @@ export class StudioController {
   get hasBlockingChanges():boolean{return this.dirty||this.sourceDraftDirty;}
   setRoute=(route:ModelRoute):void=>this.update({route});clearError=():void=>{if(!this.state.conflict)this.update({error:''});};notify=(notice:string):void=>this.update({notice});
   setCreativeHandler(handler:typeof this.creativeHandler):void{this.creativeHandler=handler;}
-  edit=(project:VideoProject,_record=true):void=>{
-    if(!this.state.snapshot||this.state.pending||this.state.conflict)return;
-    const task=this.state.snapshot.task;if(task?.status==='running'&&['storyboard','scenes','modify','audio'].includes(task.kind))return;
+  edit=(project:VideoProject,_record=true):boolean=>{
+    if(this.disposed||this.state.snapshot?.project?.id!==project.id||this.state.pending||this.state.conflict)return false;
+    const task=this.state.snapshot.task;
+    if(task?.status==='running'&&task.kind!=='export')return false;
     this.editSerial++;this.dirty=true;
     this.update({snapshot:{...this.state.snapshot,project},saving:true,dirty:true,notice:'',error:''});
     clearTimeout(this.saveTimer);this.saveTimer=setTimeout(()=>{this.saveTimer=undefined;void this.flush();},450);
+    return true;
   };
+  /** Undo the deletion through persisted history only while it still owns the current revision. */
+  editWithUndo(project:VideoProject):{undo?:EditUndo}|null{
+    const revision=this.serverRevision,epoch=this.actionEpoch,serial=this.editSerial+1;
+    const isolated=!this.dirty&&!this.busy&&!this.state.sourceDraft&&revision!==null&&this.serverProjectId===project.id;
+    if(!this.edit(project))return null;
+    if(!isolated||revision===null)return {};
+    const nextRevision=revision+1;
+    const available=()=>!this.disposed&&!this.busy&&!this.state.conflict&&!this.state.sourceDraft
+      &&this.state.snapshot?.project?.id===project.id&&this.editSerial===serial&&this.actionEpoch===epoch
+      &&(this.dirty?this.serverRevision===revision:this.savedEditSerial===serial&&this.serverRevision===nextRevision);
+    return {undo:{available,run:async()=>{
+      if(!available())return false;
+      await this.flush();
+      if(!available()||this.dirty||this.serverRevision!==nextRevision)return false;
+      return this.action('undo',{projectId:project.id,expectedRevision:nextRevision},'已撤销，修改历史保存在工程中。');
+    }}};
+  }
   undo=():void=>{void this.action('undo',{},'已撤销上一步，历史保存在工程中。');};
   redo=():void=>{void this.action('redo',{},'已重做，历史保存在工程中。');};
   async flush():Promise<void>{
@@ -138,7 +158,7 @@ export class StudioController {
     const operation=(async()=>{try{
       const expectedRevision=this.serverProjectId===project.id?this.serverRevision:null;
       const snapshot=await this.mutation<StudioSnapshot>('save',{project,expectedRevision});
-      if(serial===this.editSerial){this.dirty=false;this.accept(snapshot,false,true);this.update({saving:false,dirty:false,error:'',conflict:false});}
+      if(serial===this.editSerial){this.dirty=false;this.savedEditSerial=serial;this.accept(snapshot,false,true);this.update({saving:false,dirty:false,error:'',conflict:false});}
       else{this.accept(snapshot,true,true);this.update({error:''});}
       await this.refreshHistory();
     }catch(error){this.saveFailed=true;const conflict=/revision|版本|冲突|修改.*更新|已更新/i.test(message(error))||(error instanceof StudioRequestError&&/CONFLICT/.test(error.code));this.update({saving:false,error:message(error),conflict});}})();
@@ -151,7 +171,7 @@ export class StudioController {
       await this.flush();if(this.sourceDraftDirty&&!['saveSource','restoreSource','reveal','environment','cancel'].includes(endpoint))throw new Error('前端源码尚未保存，请先在源码面板保存修改。');if(this.dirty)throw new Error(this.state.error||'项目尚未保存，请重试保存。');
       if(this.state.sourceDraft&&['preview','export','generate','retry','undo','redo'].includes(endpoint))throw new Error('本工程有源码草稿，请保存或丢弃草稿后再执行此操作。切换面板会保留草稿。');
       const writes=['create','saveSource','restoreSource','apply','rename','undo','redo','retry','import','audio','bindSession','generate','duplicate','archive'].includes(endpoint);
-      const request={...(!['create','open','focus'].includes(endpoint)?{projectId:this.state.snapshot?.project?.id}:{}),...(writes?{expectedRevision:endpoint==='create'?null:this.serverRevision}:{}),...(endpoint==='cancel'?{expectedTaskId:this.state.snapshot?.task?.id}:{}),...payload as object};
+      const request={...(!['create','open','focus'].includes(endpoint)?{projectId:this.state.snapshot?.project?.id}:{}),...(writes||endpoint==='preview'?{expectedRevision:endpoint==='create'?null:this.serverRevision}:{}),...(endpoint==='cancel'?{expectedTaskId:this.state.snapshot?.task?.id}:{}),...payload as object};
       if(endpoint==='cancel'&&!request.expectedTaskId)throw new Error('没有可取消的任务，请刷新任务状态。');
       const snapshot=await (writes?this.mutation<StudioSnapshot>(endpoint,request):this.api.call<StudioSnapshot>(endpoint,request));this.accept(snapshot,false,['saveSource','restoreSource','import','rename'].includes(endpoint));await this.refreshHistory();this.update({notice,conflict:false,error:''});return true;
     }catch(error){this.update({error:message(error)});return false;}finally{this.update({pending:false});}

@@ -400,10 +400,25 @@ export class StudioService {
           if(data.frame!==undefined)frame=await this.renderer.capture(root,project,this.settings,Number(data.frame),data.signal instanceof AbortSignal?data.signal:undefined);
           return {ok:true,value:{projectId:project.id,revision:project.revision,spec,source,frame}};
         }
+        case 'thumbnails':{
+          const {root,project}=this.required();
+          if(data.projectId!==project.id)throw new Error('缩略图请求必须指定当前工程 ID');
+          this.assertRevision(data,true);this.assertIdle();
+          const frames=await this.renderer.thumbnails(root,project,this.settings,data.frames);
+          return {ok:true,value:{projectId:project.id,revision:project.revision,frames}};
+        }
         case 'source':{const {root,project:current}=this.required();const project=data.revision===undefined?current:await this.store.readProject(root,data.revision);const shot=project.shots.find(s=>s.id===data.shotId);if(!shot)throw new Error('镜头已不存在');return {ok:true,value:await this.store.readSource(root,shot,project.revision)};}
         case 'saveSource':{this.assertIdle();const {root,project}=this.required();const shot=project.shots.find(s=>s.id===data.shotId);if(!shot)throw new Error('镜头已不存在');const source=parseSceneSource(JSON.stringify(data.source));await persist(project,{[shot.id]:source},'保存镜头源码');await this.start('preview',async signal=>{const checked=await this.renderer.check(root,this.required().project,this.settings,signal);if(!checked.ok)throw new Error(checked.errors.map(e=>e.message).join('\n'));await this.store.markSourceGood(root,shot);},shot.id,this.recordedRequest('preview',data));break;}
         case 'restoreSource':{this.assertIdle();const {root,project}=this.required();const shot=project.shots.find(s=>s.id===data.shotId);if(!shot)throw new Error('镜头已不存在');const source=await this.store.restorationSource(root,shot);await persist(project,{[shot.id]:source},'恢复镜头源码');break;}
-        case 'preview':{const {root,project}=this.required();compileSpec(project);await this.start('preview',async signal=>{await this.refreshPreview();signal.throwIfAborted();this.progress(.1,'检查资源与关键帧');const checked=await this.renderer.check(root,this.required().project,this.settings,signal);if(!checked.ok)throw new Error(checked.errors.map(e=>e.message).join('\n'));for(const shot of this.required().project.shots)await this.store.markSourceGood(root,shot);},undefined,this.recordedRequest('preview',data),data._retryOf);break;}
+        case 'preview':{
+          const {root,project}=this.required();
+          if(data.prepareOnly===true){
+            if(data.projectId!==project.id)throw new Error('预览请求必须指定当前工程 ID');
+            this.assertRevision(data,true);this.assertIdle();compileSpec(project);await this.refreshPreview();break;
+          }
+          compileSpec(project);
+          await this.start('preview',async signal=>{await this.refreshPreview();signal.throwIfAborted();this.progress(.1,'检查资源与关键帧');const checked=await this.renderer.check(root,this.required().project,this.settings,signal);if(!checked.ok)throw new Error(checked.errors.map(e=>e.message).join('\n'));for(const shot of this.required().project.shots)await this.store.markSourceGood(root,shot);},undefined,this.recordedRequest('preview',data),data._retryOf);break;
+        }
         case 'generate':{
           const {root,project}=this.required(),route={provider:String(data.provider??''),model:String(data.model??'')},kind=data.kind as 'storyboard'|'scenes'|'modify';if(!['storyboard','scenes','modify'].includes(kind))throw new Error('生成类型无效');
           if(operation)await reserveExternalOperation(join(root,'.studio/state.sqlite'),operation,'generate');

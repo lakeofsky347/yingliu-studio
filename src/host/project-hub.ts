@@ -262,6 +262,7 @@ export class ProjectHub {
         return {ok:true,value:await this.decorate(service,sessionId)};
       }
       const result=await service.rpc(endpoint,data);if(!result.ok)return result;
+      if(endpoint==='thumbnails')return result;
       if(['source','inspect','history','tasks','jobs','candidate.validate','operation.get','operation.receipt','operation.intent'].includes(endpoint)||record(result.value).operationReceipt){await this.remember(await service.snapshot());return result;}
       if(endpoint==='catalog')this.providers=(result.value as StudioSnapshot).providers;
       if(endpoint==='tts'){const snapshot=result.value as StudioSnapshot;this.tts=snapshot.tts;}

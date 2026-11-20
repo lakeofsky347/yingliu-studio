@@ -6,7 +6,7 @@ import './app.css';
 
 const api=new StandaloneStudioApi();
 const controller=new StudioController(api);
-controller.setScheme('dark');
+try{if(localStorage.getItem('yingliu-workbench-scheme')==='light')controller.setScheme('light');}catch{/* Use the default workbench theme. */}
 const mount=document.getElementById('root');
 if(!mount)throw new Error('缺少应用挂载节点 #root');
 createRoot(mount).render(<App controller={controller} api={api}/>);

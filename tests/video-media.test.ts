@@ -23,6 +23,19 @@ test('video clips validate source ranges, one layer per shot and v1 migration pr
   migrated.videoClips.push({...migrated.videoClips[0]!,id:'other'});assert.equal(validateProject(migrated).ok,false);
 });
 
+test('duplicating a disconnected shot preserves the main chain and copies its source reference',()=>{
+  const project=createProject('分镜副本'),original=project.shots.at(-1)!;
+  project.shotOrder=project.shotOrder.filter(id=>id!==original.id);
+  project.extensions.graphEdges=project.shotOrder.map((from,index)=>({from,to:project.shotOrder[index+1]??'film-output'}));
+  const duplicated=duplicateShot(project,original.id),copy=duplicated.shots.at(-1)!;
+  assert.equal(duplicated.revision,project.revision+1);
+  assert.deepEqual(duplicated.shotOrder,project.shotOrder);
+  assert.deepEqual(duplicated.extensions.graphEdges,project.extensions.graphEdges);
+  assert.equal(duplicated.shots.length,project.shots.length+1);
+  assert.notEqual(copy.id,original.id);
+  assert.deepEqual(duplicated.extensions.sourceCopies,{[copy.id]:original.sourcePath});
+});
+
 test('real video imports, random seeks, code overlays, mixed-shot export and migrated history',{skip:!(env.browserAvailable&&env.ffmpegAvailable&&env.ffprobeAvailable),timeout:120_000},async()=>{
   const directory=await mkdtemp(join(tmpdir(),'yingliu-video-')),store=new ProjectStore({baseDirectory:directory}),renderer=new VideoRenderer(store);
   try{

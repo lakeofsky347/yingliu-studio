@@ -8,7 +8,7 @@ import {VideoRenderer} from '../src/host/renderer.ts';
 import {createProject,defaultShot,defaultSceneSource} from '../src/core/index.ts';
 import {AppSceneGenerator} from '../src/host/generator.ts';
 import type {ProviderHost,SecretStore} from '../src/app/contracts.ts';
-import type {StudioSnapshot} from '../src/shared/types.ts';
+import type {StudioSnapshot,VideoProject} from '../src/shared/types.ts';
 
 // These are backend persistence/concurrency tests. Browser, mixing and media QA are stubbed.
 const original={preview:VideoRenderer.prototype.preview,assetBaseUrl:VideoRenderer.prototype.assetBaseUrl,audioPreview:VideoRenderer.prototype.audioPreview,check:VideoRenderer.prototype.check};
@@ -22,6 +22,25 @@ after(()=>Object.assign(VideoRenderer.prototype,original));
 const providers:ProviderHost={listProviders:()=>[],listModels:async()=>[],async *stream(){throw new Error('A real provider must never be called by backend tests');}};
 function memoryCredentials():SecretStore{const values=new Map<string,string>();return {async get(ref){return values.get(ref);},async set(ref,value){values.set(ref,value);},async delete(ref){values.delete(ref);}};}
 async function fixture(){const dataDirectory=await mkdtemp(join(tmpdir(),'yingliu-backend-'));const credentials=memoryCredentials();const backend=new AppBackend({dataDirectory,providers,credentials});return {backend,credentials,dataDirectory,async close(){await backend.dispose();await rm(dataDirectory,{recursive:true,force:true});}};}
+
+test('explicit preparation repairs the saved preview without changing its revision or running validation',async t=>{
+  let failFirst=true;
+  t.mock.method(VideoRenderer.prototype,'preview',async(_root:string,project:VideoProject)=>{
+    if(failFirst){failFirst=false;throw new Error('Temporary preview failure');}
+    return `http://localhost:1/index.html?revision=${project.revision}`;
+  });
+  const check=t.mock.method(VideoRenderer.prototype,'check');
+  const f=await fixture();try{
+    const first=await f.backend.call<StudioSnapshot>('create',{title:'准备影片监视器'}),projectId=first.project!.id;
+    assert.equal(first.previewUrl,null);
+    const stale=await f.backend.route('preview',{projectId,expectedRevision:1,prepareOnly:true});
+    assert.ok(!stale.ok);assert.equal(stale.error.code,'REVISION_CONFLICT');
+    const ready=await f.backend.call<StudioSnapshot>('preview',{projectId,expectedRevision:0,prepareOnly:true});
+    assert.equal(ready.previewRevision,0);assert.ok(ready.previewUrl);
+    assert.equal(ready.project!.revision,0);assert.equal(ready.task?.id,first.task?.id);
+    assert.equal(check.mock.callCount(),0);
+  }finally{await f.close();}
+});
 
 test('blank project, same-revision concurrent commands, stable shot IDs and CAS errors',async()=>{
   const f=await fixture();try{

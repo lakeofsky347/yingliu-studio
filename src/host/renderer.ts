@@ -13,6 +13,7 @@ import { ProjectStore, projectPath } from './store.js';
 import { browserRuntime, runtimeHtml } from '../runtime/browser.js';
 import {AudioMixer,probeAudio, type AudioMix} from './audio.js';
 import {inspectToolEnvironment, type ToolEnvironmentOptions} from './tool-environment.js';
+import { atomicRename } from './atomic-rename.js';
 
 export interface FrameCapture { frame:number; shotId:string; path:string; sha256:string }
 export interface RenderIssue { shotId?:string; frame?:number; message:string }
@@ -63,7 +64,7 @@ async function projectServer(root:string):Promise<ProjectServer> {
       relative=relative.replace(/^runtime\/versions\/[a-f0-9]{64}\/assets\//,'assets/');
       // Scene code may read render resources, never editor state, journals or source history.
       const allowed=/^runtime\/versions\/[a-f0-9]{64}\/(?:index\.html|runtime\/(?:frame\.mjs|spec\.json|scenes\/[\w-]+\.mjs))$/.test(relative)||relative==='index.html'||/^runtime\/(?:frame\.mjs|spec\.json|scenes\/[\w-]+\.mjs|audio\/mix-[\w-]+\.wav)$/.test(relative)||
-        /^assets\/[\w./-]+$/.test(relative)||/^\.studio\/inspection\/[\w-]+\.png$/.test(relative)||/^exports\/[\w-]+\/video\.mp4$/.test(relative);
+        /^assets\/[\w./-]+$/.test(relative)||/^\.studio\/inspection\/[\w-]+\.png$/.test(relative)||/^\.studio\/thumbnails\/[a-f0-9]{64}\/\d+\.png$/.test(relative)||/^exports\/[\w-]+\/video\.mp4$/.test(relative);
       if(!allowed){res.writeHead(403);res.end('Resource is private');return;}
       const full=await projectPath(absoluteRoot,relative),type=mime[path.extname(full).toLowerCase()];
       if(!type){res.writeHead(415);res.end('Unsupported file type');return;}
@@ -148,7 +149,7 @@ export class VideoRenderer {
     }
     return {spec,urlPath:'/'+relative+'/index.html'};
   }
-  private async openPage(url:string,spec:VideoSpec,settings:EnvironmentSettings,issues:RenderIssue[],signal?:AbortSignal):Promise<{browser:Browser;page:Page;removeAbort:()=>void}> {
+  private async openPage(url:string,spec:VideoSpec,settings:EnvironmentSettings,issues:RenderIssue[],signal?:AbortSignal,deviceScaleFactor=1):Promise<{browser:Browser;page:Page;removeAbort:()=>void}> {
     aborted(signal);const env=detectEnvironment(settings);if(!env.browserAvailable)throw new Error('Chrome/Chromium unavailable. Set browserPath in environment settings.');
     validatePhase('openPage','start');
     await fs.access(env.browserPath,constants.X_OK);
@@ -159,7 +160,7 @@ export class VideoRenderer {
     const browser=await new Promise<Browser>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Browser launch (90 s timeout)')),90_000);chromium.launch({executablePath:env.browserPath,headless:true,timeout:90_000,args:['--disable-background-timer-throttling','--disable-renderer-backgrounding','--disable-accelerated-2d-canvas','--disable-accelerated-video-decode']}).then(value=>{clearTimeout(timer);resolve(value);},error=>{clearTimeout(timer);reject(error);});});this.browsers.add(browser);
     const cancel=()=>{void browser.close().catch(()=>{});};signal?.addEventListener('abort',cancel,{once:true});
     try {
-      const context=await browser.newContext({viewport:{width:spec.target.width,height:spec.target.height},deviceScaleFactor:1,serviceWorkers:'block'});
+      const context=await browser.newContext({viewport:{width:spec.target.width,height:spec.target.height},deviceScaleFactor,serviceWorkers:'block'});
       const origin=new URL(url).origin;
       await context.route('**/*',async route=>{
         const request=new URL(route.request().url());
@@ -194,9 +195,51 @@ export class VideoRenderer {
       }catch(error){const e=error as any;return {ok:false,message:e.message,shotId:e.shotId,frame:e.frame};}
     },{frame,fps:spec.target.fps}),'Frame '+frame);
     if(!result.ok){const error=new Error(result.message) as Error&RenderIssue;error.shotId=result.shotId;error.frame=result.frame;throw error;}
-    const captured={buffer:await page.screenshot({type:'png',clip:{x:0,y:0,width:spec.target.width,height:spec.target.height},timeout:30_000}),shotId:result.info.sceneId};
-    validatePhase('frame',`end ${frame}`);
-    return captured;
+    for(let attempt=1;;attempt++){
+      try{
+        const buffer=await page.screenshot({type:'png',clip:{x:0,y:0,width:spec.target.width,height:spec.target.height},timeout:30_000});
+        validatePhase('frame',`end ${frame}`);
+        return {buffer,shotId:result.info.sceneId};
+      }catch(error){
+        const message=error instanceof Error?error.message:String(error);
+        if(attempt>=3||!message.includes('Unable to capture screenshot'))throw error;
+        await deadline(page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve())))),'Compositor frame '+frame).catch(()=>{});
+      }
+    }
+  }
+  /** Render at most three frames of an immutable runtime using one Chromium session. */
+  async thumbnails(root:string,project:VideoProject,settings:EnvironmentSettings,requested:unknown):Promise<{frame:number;url:string}[]> {
+    const {spec,urlPath}=await this.prepare(root,project);
+    if(!Array.isArray(requested)||requested.length<1||requested.length>3||requested.some(frame=>!Number.isSafeInteger(frame)||frame<0||frame>=spec.durationFrames)){
+      throw new Error('缩略图请求需要 1 到 3 个有效帧号');
+    }
+    const server=await this.server(root),cacheKey=hash(urlPath);
+    const captures=await Promise.all([...new Set<number>(requested)].map(async frame=>{
+      const relative=`.studio/thumbnails/${cacheKey}/${frame}.png`;
+      const file=await projectPath(root,relative);
+      const cached=await fs.stat(file).then(stat=>stat.isFile(),error=>{
+        if((error as NodeJS.ErrnoException).code==='ENOENT')return false;
+        throw error;
+      });
+      return {frame,url:server.origin+'/'+relative,file,cached};
+    }));
+    const missing=captures.filter(capture=>!capture.cached);
+    if(missing.length){
+      const issues:RenderIssue[]=[];
+      const scale=Math.min(1,320/spec.target.width,180/spec.target.height);
+      const connection=await this.openPage(server.origin+urlPath,spec,settings,issues,undefined,scale);
+      try{
+        for(const capture of missing){
+          const {buffer}=await this.frame(connection.page,spec,capture.frame);
+          if(issues.length)throw new Error(issues.map(issue=>issue.message).join('\n'));
+          await fs.mkdir(path.dirname(capture.file),{recursive:true});
+          const temporary=capture.file+'.tmp-'+randomUUID();
+          try{await fs.writeFile(temporary,buffer);await atomicRename(temporary,capture.file);}
+          finally{await fs.rm(temporary,{force:true});}
+        }
+      }finally{connection.removeAbort();await closeBrowser(connection.browser);this.browsers.delete(connection.browser);}
+    }
+    return captures.map(({frame,url})=>({frame,url}));
   }
   async capture(root:string,project:VideoProject,settings:EnvironmentSettings,frame:number,signal?:AbortSignal):Promise<FrameCapture&{url:string}>{
     const {spec,urlPath}=await this.prepare(root,project),errors:RenderIssue[]=[];aborted(signal);

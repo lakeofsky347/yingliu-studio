@@ -31,7 +31,7 @@ async function openFilm(){
   await page!.getByRole('heading',{name:'我的影片',exact:false}).waitFor();
   await page!.getByRole('button',{name:filmTitle,exact:true}).click();
   await page!.locator('.vs-studio').waitFor();
-  await page!.locator('.vs-shotchip').first().waitFor();
+  await page!.locator('.vs-clip').first().waitFor();
 }
 
 try{
@@ -115,26 +115,26 @@ try{
 
   stage='源码草稿跨镜头与面板恢复';
   const firstShot=(await current()).project!.shotOrder[0]!;
-  await page.locator('.vs-shotchip').first().click();
-  await page.getByRole('tab',{name:'前端源码',exact:true}).click();
+  await page.locator('.vs-clip').first().click();
+  await openDrawerIfCompact(page);await page.getByRole('tab',{name:'前端源码',exact:true}).click();
   const htmlEditor=page.getByRole('textbox',{name:'HTML 源码',exact:true});
   await htmlEditor.waitFor();const originalHtml=await htmlEditor.inputValue();
   const draftHtml=originalHtml+'\n<!-- upstream-sync-retained-draft -->';
   await htmlEditor.fill(draftHtml);
   await page.getByText('草稿已保留 · 未提交',{exact:true}).waitFor();
   assert.ok(!(await application.backend.call<SceneSource>('source',{projectId,shotId:firstShot})).html.includes('upstream-sync-retained-draft'));
-  await page.locator('.vs-shotchip').nth(1).click();
+  await page.locator('.vs-clip').nth(1).click();
   await until(async()=>await htmlEditor.inputValue()!==draftHtml,'切换第二镜头源码');
-  await page.getByRole('tab',{name:'声音与配音',exact:true}).click();
-  await page.getByRole('tab',{name:'前端源码',exact:true}).click();
-  await page.locator('.vs-shotchip').first().click();
+  await openDrawerIfCompact(page);await page.getByRole('tab',{name:'声音与配音',exact:true}).click();
+  await openDrawerIfCompact(page);await page.getByRole('tab',{name:'前端源码',exact:true}).click();
+  await page.locator('.vs-clip').first().click();
   await until(async()=>await htmlEditor.inputValue()===draftHtml,'返回第一镜头草稿');
   pass('源码草稿切换镜头和工作面板后恢复，未提前写入已保存源码');
 
   stage='刷新后草稿恢复与保存';
   await page.reload();await openFilm();
-  await page.locator('.vs-shotchip').first().click();
-  await page.getByRole('tab',{name:'前端源码',exact:true}).click();
+  await page.locator('.vs-clip').first().click();
+  await openDrawerIfCompact(page);await page.getByRole('tab',{name:'前端源码',exact:true}).click();
   await htmlEditor.waitFor();await until(async()=>await htmlEditor.inputValue()===draftHtml,'页面刷新后草稿恢复');
   await page.getByText('草稿已保留 · 未提交',{exact:true}).waitFor();
   const cached=await page.evaluate(()=>Object.entries(localStorage).filter(([key])=>key.includes('source-drafts')).map(([,value])=>value));
@@ -165,3 +165,8 @@ try{
   await rm(temporary,{recursive:true,force:true});
 }
 if(failure)throw failure;
+
+async function openDrawerIfCompact(page:Page):Promise<void>{
+  const switcher=page.getByRole('tablist',{name:'切换面板',exact:true});
+  if(await switcher.isVisible())await switcher.getByRole('tab',{name:'工作面板',exact:true}).click();
+}
