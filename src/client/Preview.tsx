@@ -29,7 +29,7 @@ function FrameThumb({url,frame,active,onSelect,label,failed}:{url?:string;frame:
 
 export function Preview({snapshot,project,selectedShot,controller,focusFrame,focusSerial,busy=false,syncing=false,preparePreview,transport}:{snapshot:StudioSnapshot;project:VideoProject;selectedShot?:Shot;controller:StudioController;focusFrame?:number|null;focusSerial?:number;busy?:boolean;syncing?:boolean;preparePreview?:()=>void;transport?:Playhead}){
   const preview=useRef<HTMLDivElement>(null),iframe=useRef<HTMLIFrameElement>(null),audio=useRef<HTMLAudioElement>(null),currentFrame=useRef(0),handledSpace=useRef(false);
-  const [readyKey,setReadyKey]=useState(''),[frame,setFrame]=useState(0),[playing,setPlaying]=useState(false),[sceneId,setSceneId]=useState(''),[showOutput,setShowOutput]=useState(false),[expanded,setExpanded]=useState(false),[jump,setJump]=useState('0'),[jumping,setJumping]=useState(false),[audioError,setAudioError]=useState(''),[capturing,setCapturing]=useState(false),[capture,setCapture]=useState<{path:string;url:string}|null>(null),[previewError,setPreviewError]=useState(''),[reload,setReload]=useState(0);
+  const [readyKey,setReadyKey]=useState(''),[frame,setFrame]=useState(0),[playing,setPlaying]=useState(false),[sceneId,setSceneId]=useState(''),[showOutput,setShowOutput]=useState(false),[expanded,setExpanded]=useState(false),[jump,setJump]=useState('0'),[jumping,setJumping]=useState(false),[audioError,setAudioError]=useState(''),[capturing,setCapturing]=useState(false),[capture,setCapture]=useState<{path:string;url:string}|null>(null),[previewError,setPreviewError]=useState(''),[reload,setReload]=useState(0),[reloading,setReloading]=useState(false);
   const duration=project.shots.reduce((n,s)=>n+s.durationFrames,0),fps=project.target.fps.num/project.target.fps.den;
   currentFrame.current=frame;
   const maxFrame=Math.max(0,duration-1),origin=snapshot.previewUrl?new URL(snapshot.previewUrl).origin:'';
@@ -122,19 +122,30 @@ export function Preview({snapshot,project,selectedShot,controller,focusFrame,foc
     studio.addEventListener('keydown',onKey);studio.addEventListener('keyup',onKeyUp);return()=>{studio.removeEventListener('keydown',onKey);studio.removeEventListener('keyup',onKeyUp);studio.removeEventListener('pointerdown',onPointer,true);studio.removeEventListener('keydown',onTab,true);};
   },[ready,showOutput,maxFrame,expanded]);
   async function reloadScene(){
-    setPlaying(false);
+    if(reloading)return;
+    setReloading(true);setPlaying(false);setReadyKey('');
     try{
-      await window.yingliu?.resetScene?.();
-      await controller.refreshMediaProject();
-      setReadyKey('');setPreviewError('');setReload(value=>value+1);
+      // A stalled iframe can time out during native reset. A newer saved scene can still replace it.
+      let resetError:unknown;
+      try{await window.yingliu?.resetScene?.();}catch(error){resetError=error;}
+      if(controller.getSnapshot().snapshot?.project?.id!==project.id)return;
+      if(!await controller.refreshMediaProject())throw new Error('工程状态正在更新，请稍后重新加载画面。');
+      const saved=controller.getSnapshot().snapshot;
+      if(saved?.project?.id!==project.id)return;
+      if(resetError&&saved.project.revision===project.revision)throw resetError;
+      if((!saved.previewUrl||saved.previewRevision!==saved.project.revision)&&
+        !await controller.action('preview',{prepareOnly:true})){
+        throw new Error(controller.getSnapshot().error||'无法准备当前版本的预览，请检查分镜主链后重试。');
+      }
+      setPreviewError('');setReload(value=>value+1);
     }catch(error){
       setPreviewError(error instanceof Error?error.message:'刷新画面失败，请重试。');
-    }
+    }finally{setReloading(false);}
   }
   async function capturePng(){const capturedFrame=currentFrame.current;setPlaying(false);setCapturing(true);try{await controller.flush();if(controller.getSnapshot().error)throw new Error(controller.getSnapshot().error);const result=await controller.api.call<{frame?:{path:string;url:string}}>('inspect',{projectId:project.id,shotId:frameShotRange(project,capturedFrame).shot?.id,frame:capturedFrame});if(!result.frame)throw new Error('未获得 PNG 帧');setCapture(result.frame);controller.notify(`第 ${capturedFrame} 帧 PNG 已保存到项目中。`);}catch(error){controller.notify(error instanceof Error?error.message:'导出 PNG 失败');}finally{setCapturing(false);}}
   const localFrame=currentRange.localFrame;
   const output=project.outputs.at(-1),outdated=snapshot.previewRevision!==null&&snapshot.previewRevision!==project.revision;
-  const disabled=!ready||showOutput;
+  const disabled=!ready||showOutput||reloading;
   const mixed=!!snapshot.audioUrl&&project.target.audioMode==='mixed';
   const commitJump=()=>{const value=Number(jump);if(jump.trim()!==''&&Number.isFinite(value))seek(value);setJumping(false);};
   const shotLabel=showOutput?"已导出 MP4":currentRange.shot?`「${currentRange.shot.title}」· 帧 [${currentRange.start}, ${currentRange.end})`:"整片逐帧查看";
@@ -168,7 +179,7 @@ export function Preview({snapshot,project,selectedShot,controller,focusFrame,foc
           <button type="button" disabled={disabled||busy||capturing} onClick={()=>{close();void capturePng();}}><Icon name="camera"/><span>{capturing?"正在保存…":"导出当前帧 PNG"}</span></button>
           {output?.url&&<button type="button" onClick={()=>{close();setPlaying(false);setReadyKey('');setShowOutput(value=>!value);}}><Icon name={showOutput?'film':'play'}/><span>{showOutput?"返回逐帧":"播放成片"}</span></button>}
           {output&&<button type="button" onClick={()=>{close();void controller.action('reveal',{path:output.path});}}><Icon name="external"/><span>打开成片 →</span></button>}
-          <button type="button" onClick={()=>{close();void reloadScene();}}><Icon name="refresh"/><span>重新载入画面</span></button>
+          <button type="button" disabled={reloading} onClick={()=>{close();void reloadScene();}}><Icon name="refresh"/><span>重新载入画面</span></button>
           <div className="vs-menu-note">{currentRange.shot?`镜头 F${localFrame} · ${(localFrame/fps).toFixed(3)}s`:''}{sceneId&&!showOutput?` · ${project.shots.find(s=>s.id===sceneId)?.title||sceneId}`:''}</div>
         </div>}
       </Popover>
@@ -176,6 +187,6 @@ export function Preview({snapshot,project,selectedShot,controller,focusFrame,foc
     {capture&&<div className="vs-captured-frame"><Icon name="check"/><a href={capture.url} target="_blank" rel="noreferrer">查看已保存 PNG ↗</a><button type="button" onClick={()=>void controller.action('reveal',{path:capture.path})}>打开 PNG 文件</button><button type="button" className="vs-iconbutton" aria-label="关闭提示" onClick={()=>setCapture(null)}><Icon name="close"/></button></div>}
     {snapshot.previewUrl&&ready&&!showOutput&&<div className="vs-keyframe-strip"><div className="vs-eyebrow" data-testid="keyframe-scope">{selectedShot?`选中「${selectedShot.title}」的关键帧`:"全片关键帧"}</div><div className="vs-keyframes" aria-label="镜头关键帧">{marks.map((number,index)=><FrameThumb key={`${thumbnailKey}:${number}`} url={thumbnails.key===thumbnailKey?thumbnails.urls[number]:undefined} failed={thumbnails.key===thumbnailKey&&thumbnails.failed} frame={number} active={Math.abs(frame-number)<=2} label={index===0?"首帧":index===marks.length-1?"末帧":"中帧"} onSelect={seek}/>)}</div></div>}
     {audioError&&<p className="vs-inline-error">{audioError}</p>}
-    {previewError&&<div className="vs-inline-error vs-render-error" role="alert"><span>{previewError}</span><button type="button" onClick={()=>void reloadScene()}>重新加载画面</button></div>}
+    {previewError&&<div className="vs-inline-error vs-render-error" role="alert"><span>{previewError}</span><button type="button" disabled={reloading} onClick={()=>void reloadScene()}>{reloading?'正在重新加载…':'重新加载画面'}</button></div>}
   </div>;
 }
