@@ -29,7 +29,7 @@ export function BottomDrawer<T extends string>({tabs,active,open,height,flash,on
       onKeyDown={event=>{if(event.key==='ArrowUp'){event.preventDefault();onResize(height+24);}if(event.key==='ArrowDown'){event.preventDefault();onResize(Math.max(160,height-24));}}}/>}
     <div className="vs-drawer-bar">
       <div ref={tablist} className="vs-tabs" role="tablist" aria-label="主要工作面板">
-        {tabs.map(tab=><button type="button" key={tab.id} role="tab" aria-selected={open&&active===tab.id} className={open&&active===tab.id?'is-active':''}
+        {tabs.map(tab=><button type="button" key={tab.id} role="tab" aria-label={tab.label} aria-selected={open&&active===tab.id} className={open&&active===tab.id?'is-active':''}
           onClick={()=>onSelect(tab.id)}><Icon name={tab.icon}/><span>{tab.label}</span>{tab.badge}</button>)}
       </div>
       <button type="button" className="vs-iconbutton vs-drawer-toggle" aria-expanded={open} aria-label={open?"收起面板":"展开面板"} title={open?"收起面板":"展开面板"} onClick={onToggle}><Icon name={open?'chevronDown':'chevronUp'}/></button>
