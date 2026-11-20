@@ -597,7 +597,7 @@
 .vs-timeline-ruler span:last-child::before{left:auto;right:0}
 .vs-timeline-track{position:relative;flex:1;min-height:0;display:flex;align-items:stretch;gap:5px;padding:1px 2px}
 .vs-timeline-track>.vs-clip{flex:var(--vs-clip-grow,1) 1 0}
-.vs-studio .vs-clip{position:relative;min-width:120px;height:100%;padding:5px 10px 5px 6px;gap:8px;justify-content:flex-start;text-align:left;overflow:hidden;
+.vs-studio .vs-clip{position:relative;min-width:120px;height:100%;padding:5px 10px 5px 6px;gap:8px;justify-content:flex-start;text-align:left;overflow:hidden;user-select:none;
   border:1px solid var(--vs-line);border-radius:9px;background:var(--vs-surface-2);box-shadow:var(--vs-shadow-1);transition:border-color var(--vs-dur-1),background var(--vs-dur-1),box-shadow var(--vs-dur-2),transform var(--vs-dur-2) var(--vs-ease-spring),opacity var(--vs-dur-1)}
 .vs-studio .vs-clip:hover:not(:disabled){border-color:var(--vs-line-strong);background:var(--vs-surface-3)}
 .vs-studio .vs-clip.is-active{border-color:var(--vs-accent);background:color-mix(in srgb,var(--vs-accent-soft) 55%,var(--vs-surface-2));box-shadow:0 0 0 1px var(--vs-accent),0 6px 14px -6px var(--vs-accent-ring);transform:translateY(-1px)}
